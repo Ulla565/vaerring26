@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="no">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Værring 2026</title>
+
+<style>
+
+body{
+font-family:Arial,sans-serif;
+background:#f3f3f3;
+padding:20px;
+max-width:800px;
+margin:auto;
+}
+
+h1{
+text-align:center;
+}
+
+.knapp{
+display:block;
+padding:20px;
+background:white;
+margin:20px 0;
+border-radius:10px;
+text-align:center;
+font-size:24px;
+font-weight:bold;
+cursor:pointer;
+}
+
+.medlem{
+background:white;
+padding:15px;
+margin-bottom:15px;
+border-radius:10px;
+}
+
+.vaer{
+display:flex;
+justify-content:space-between;
+padding:3px 0;
+}
+
+.tilbake{
+margin-bottom:20px;
+cursor:pointer;
+color:blue;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="app"></div>
+
+<script>
+
+let medlemmerData=[];
+let vaerData=[];
+
+Promise.all([
+fetch("appdata.csv").then(r=>r.text()),
+fetch("medlemmer.csv").then(r=>r.text())
+])
+
+.then(([appdata, medlemmer])=>{
+
+vaerData = parseCSV(appdata);
+medlemmerData = parseCSV(medlemmer);
+
+visForside();
+
+});
+
+function parseCSV(csv){
+
+let rows = csv.trim().split("\n");
+
+let headers = rows[0].split(",");
+
+return rows.slice(1).map(row=>{
+
+let values = row.split(",");
+
+let obj = {};
+
+headers.forEach((h,i)=>{
+
+obj[h.trim()] = values[i]?.trim();
+
+});
+
+return obj;
+
+});
+
+}
+
+function visForside(){
+
+document.getElementById("app").innerHTML=`
+
+<h1>VÆRRING 2026</h1>
+
+<div class="knapp"
+onclick="visAvdeling('Søndre')">
+
+SØNDRE AVD.
+</div>
+
+<div class="knapp"
+onclick="visAvdeling('Nordre')">
+
+NORDRE AVD.
+</div>
+
+`;
+
+}
+
+function visAvdeling(avdeling){
+
+let medlemmer = [];
+
+if(avdeling==="Søndre"){
+
+medlemmer=[
+"Per-Joar",
+"Bernt",
+"Per Jonas"
+];
+
+}
+
+if(avdeling==="Nordre"){
+
+medlemmer=[
+"Johanne",
+"Einar&Thea",
+"Agnete"
+];
+
+}
+
+let html=`
+<div class="tilbake"
+onclick="visForside()">
+← Tilbake
+</div>
+`;
+
+medlemmer.forEach(medlem=>{
+
+let gjenstar = medlemmerData.find(
+m=>m.Medlem===medlem
+);
+
+html+=`
+<div class="medlem">
+
+<h2>${medlem}</h2>
+
+<p>
+Gjenstår:
+${gjenstar ? gjenstar.Gjenstår : "-"}
+søyer
+</p>
+`;
+
+vaerData
+.filter(v=>v.Hos===medlem)
+.forEach(v=>{
+
+html+=`
+<div class="vaer">
+
+<span>${v["Vær"]}</span>
+
+<strong>
+${v.Parringer}
+</strong>
+
+</div>
+`;
+
+});
+
+html+=`</div>`;
+
+});
+
+document.getElementById("app").innerHTML=html;
+
+}
+
+</script>
+
+</body>
+</html>
