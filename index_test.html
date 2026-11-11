@@ -77,7 +77,6 @@ border-radius:10px;
 }
 
 </style>
-
 </head>
 
 <body>
@@ -101,19 +100,24 @@ medlemmerData=parseCSV(medlemmer);
 
 visForside();
 
+})
+
+.catch(error=>{
+document.getElementById("app").innerHTML =
+"<h2>Feil ved innlasting</h2><p>" + error + "</p>";
 });
 
 function parseCSV(csv){
 
-let rows=csv.trim().split("\n");
+let rows = csv.trim().split(/\r?\n/);
 
-let headers=rows[0].split(",");
+let headers = rows[0].split(",");
 
 return rows.slice(1).map(row=>{
 
-let values=row.split(",");
+let values = row.split(",");
 
-let obj={};
+let obj = {};
 
 headers.forEach((h,i)=>{
 
@@ -124,7 +128,6 @@ obj[h.trim()] = values[i]?.trim() || "";
 return obj;
 
 });
-
 }
 
 function visForside(){
@@ -141,10 +144,9 @@ vaerData.filter(v=>
 .includes(v.Hos)
 ).length;
 
-document.getElementById("app").innerHTML=`
+document.getElementById("app").innerHTML = `
 
 <h1>
-
 <div class="hoved">
 VÆRRINGEN
 </div>
@@ -152,23 +154,16 @@ VÆRRINGEN
 <div class="under">
 RINGSAKER 2026
 </div>
-
 </h1>
 
-<div class="knapp"
-onclick="visAvdeling('Søndre')">
-
+<div class="knapp" onclick="visAvdeling('Søndre')">
 SØNDRE AVD.<br>
 ${sondre} værer
-
 </div>
 
-<div class="knapp"
-onclick="visAvdeling('Nordre')">
-
+<div class="knapp" onclick="visAvdeling('Nordre')">
 NORDRE AVD.<br>
 ${nordre} værer
-
 </div>
 
 `;
@@ -199,15 +194,10 @@ medlemmer=[
 
 }
 
-let html=`
-
-<div class="tilbake"
-onclick="visForside()">
-
+let html = `
+<div class="tilbake" onclick="visForside()">
 ← Tilbake
-
 </div>
-
 `;
 
 medlemmer.forEach(medlem=>{
@@ -217,19 +207,16 @@ medlemmerData.find(
 m=>m.Medlem===medlem
 );
 
-html+=`
+html += `
 
 <div class="medlem">
 
 <h2>${medlem}</h2>
 
 <p>
-
 Gjenstår:
-${gjenstar ? gjenstar.Gjenstår : "-"}
-
+${gjenstar ? Object.values(gjenstar)[1] : "-"}
 søyer
-
 </p>
 
 `;
@@ -238,7 +225,7 @@ vaerData
 .filter(v=>v.Hos===medlem)
 .forEach(v=>{
 
-html+=`
+html += `
 
 <div class="vaer"
 onclick="visVaer('${v["Kåringsnr"]}')">
@@ -253,15 +240,13 @@ onclick="visVaer('${v["Kåringsnr"]}')">
 
 });
 
-html+=`
-
+html += `
 </div>
-
 `;
 
 });
 
-document.getElementById("app").innerHTML=html;
+document.getElementById("app").innerHTML = html;
 
 }
 
@@ -272,13 +257,10 @@ vaerData.find(
 v=>v["Kåringsnr"]===karingsnr
 );
 
-document.getElementById("app").innerHTML=`
+document.getElementById("app").innerHTML = `
 
-<div class="tilbake"
-onclick="visForside()">
-
+<div class="tilbake" onclick="history.back()">
 ← Tilbake
-
 </div>
 
 <div class="info">
@@ -286,28 +268,41 @@ onclick="visForside()">
 <h2>${vaer["Vær"]}</h2>
 
 <p>
-
 <b>Kåringsnr:</b>
 ${vaer["Kåringsnr"]}
-
 </p>
 
 <p>
-
 <b>Hos:</b>
 ${vaer["Hos"]}
-
 </p>
 
 <hr>
 
-<h3>
+<h3>Parringer pr medlem</h3>
 
-Parringer pr medlem
-
-</h3>
+<p>
+Kommer i neste versjon når vi kobler inn dataene fra import.csv.
+</p>
 
 <p>
 
-Denne delen kobles mot
-Animal
+Per-Joar: 0<br>
+Bernt: 0<br>
+Per Jonas: 0<br>
+Johanne: 0<br>
+Agnete: 0<br>
+Einar&Thea: 0
+
+</p>
+
+</div>
+
+`;
+
+}
+
+</script>
+
+</body>
+</html>
