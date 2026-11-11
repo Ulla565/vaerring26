@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="no">
-
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,70 +9,85 @@
 <style>
 
 body{
-font-family:Arial,sans-serif;
-background:#f3f3f3;
-padding:20px;
-max-width:800px;
-margin:auto;
+    font-family:Arial,sans-serif;
+    background:#f3f3f3;
+    padding:20px;
+    max-width:800px;
+    margin:auto;
 }
 
 h1{
-text-align:center;
-margin-bottom:30px;
+    text-align:center;
+    margin-bottom:30px;
 }
 
 .hoved{
-font-size:38px;
-font-weight:bold;
+    font-size:38px;
+    font-weight:bold;
 }
 
 .under{
-font-size:22px;
-font-weight:normal;
+    font-size:22px;
+    font-weight:normal;
 }
 
 .knapp{
-display:block;
-padding:20px;
-background:white;
-margin:20px 0;
-border-radius:10px;
-text-align:center;
-font-size:24px;
-font-weight:bold;
-cursor:pointer;
+    display:block;
+    padding:20px;
+    background:white;
+    margin:20px 0;
+    border-radius:10px;
+    text-align:center;
+    font-size:24px;
+    font-weight:bold;
+    cursor:pointer;
 }
 
 .medlem{
-background:white;
-padding:15px;
-margin-bottom:15px;
-border-radius:10px;
+    background:white;
+    padding:15px;
+    margin-bottom:15px;
+    border-radius:10px;
 }
 
 .vaer{
-display:flex;
-justify-content:space-between;
-padding:10px 0;
-cursor:pointer;
-border-bottom:1px solid #eee;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:10px 0;
+    cursor:pointer;
+    border-bottom:1px solid #eee;
 }
 
 .vaer:hover{
-background:#fafafa;
+    background:#fafafa;
 }
 
 .tilbake{
-margin-bottom:20px;
-cursor:pointer;
-color:blue;
-font-weight:bold;
+    margin-bottom:20px;
+    cursor:pointer;
+    color:blue;
+    font-weight:bold;
 }
 
 .info{
-background:white;
-padding:20px;
-border-radius:10px;
+    background:white;
+    padding:20px;
+    border-radius:10px;
+}
+
+.parringer{
+    font-weight:bold;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+
+td{
+    padding:8px;
+    border-bottom:1px solid #eee;
 }
 
 </style>
@@ -81,224 +95,282 @@ border-radius:10px;
 
 <body>
 
-<div id="app"></div>
+<div id="app">Laster...</div>
 
 <script>
 
-let medlemmerData=[];
-let vaerData=[];
+let medlemmerData = [];
+let vaerData = [];
 
 Promise.all([
-fetch("appdata_test.csv").then(r=>r.text()),
-fetch("medlemmer.csv").then(r=>r.text())
+    fetch("appdata_test.csv").then(r => r.text()),
+    fetch("medlemmer.csv").then(r => r.text())
 ])
 
-.then(([appdata, medlemmer])=>{
+.then(([appdata, medlemmer]) => {
 
-vaerData=parseCSV(appdata);
-medlemmerData=parseCSV(medlemmer);
+    vaerData = parseCSV(appdata);
+    medlemmerData = parseCSV(medlemmer);
 
-visForside();
+    visForside();
 
 })
 
-.catch(error=>{
-document.getElementById("app").innerHTML =
-"<h2>Feil ved innlasting</h2><p>" + error + "</p>";
+.catch(error => {
+
+    document.getElementById("app").innerHTML =
+    "<h2>Feil ved innlasting</h2><p>" + error + "</p>";
+
 });
 
 function parseCSV(csv){
 
-let rows = csv.trim().split(/\r?\n/);
+    let rows = csv.trim().split(/\r?\n/);
 
-let headers = rows[0].split(",");
+    let headers = rows[0].split(",");
 
-return rows.slice(1).map(row=>{
+    return rows.slice(1).map(row => {
 
-let values = row.split(",");
+        let values = row.split(",");
 
-let obj = {};
+        let obj = {};
 
-headers.forEach((h,i)=>{
+        headers.forEach((h,i) => {
 
-obj[h.trim()] = values[i]?.trim() || "";
+            obj[h.trim()] = values[i]?.trim() || "";
 
-});
+        });
 
-return obj;
+        return obj;
 
-});
+    });
+
 }
 
 function visForside(){
 
-let sondre =
-vaerData.filter(v=>
-["Per-Joar","Bernt","Per Jonas"]
-.includes(v.Hos)
-).length;
+    let sondre =
+    vaerData.filter(v =>
+        ["Per-Joar","Bernt","Per Jonas"]
+        .includes(v.Hos)
+    ).length;
 
-let nordre =
-vaerData.filter(v=>
-["Johanne","Einar&Thea","Agnete"]
-.includes(v.Hos)
-).length;
+    let nordre =
+    vaerData.filter(v =>
+        ["Johanne","Einar&Thea","Agnete"]
+        .includes(v.Hos)
+    ).length;
 
-document.getElementById("app").innerHTML = `
+    document.getElementById("app").innerHTML = `
 
-<h1>
-<div class="hoved">
-VÆRRINGEN
-</div>
+    <h1>
 
-<div class="under">
-RINGSAKER 2026
-</div>
-</h1>
+        <div class="hoved">
+        VÆRRINGEN
+        </div>
 
-<div class="knapp" onclick="visAvdeling('Søndre')">
-SØNDRE AVD.<br>
-${sondre} værer
-</div>
+        <div class="under">
+        RINGSAKER 2026
+        </div>
 
-<div class="knapp" onclick="visAvdeling('Nordre')">
-NORDRE AVD.<br>
-${nordre} værer
-</div>
+    </h1>
 
-`;
+    <div class="knapp"
+    onclick="visAvdeling('Søndre')">
+
+    SØNDRE AVD.<br>
+    ${sondre} værer
+
+    </div>
+
+    <div class="knapp"
+    onclick="visAvdeling('Nordre')">
+
+    NORDRE AVD.<br>
+    ${nordre} værer
+
+    </div>
+
+    `;
 
 }
 
 function visAvdeling(avdeling){
 
-let medlemmer=[];
+    let medlemmer = [];
 
-if(avdeling==="Søndre"){
+    if(avdeling==="Søndre"){
 
-medlemmer=[
-"Per-Joar",
-"Bernt",
-"Per Jonas"
-];
+        medlemmer = [
+            "Per-Joar",
+            "Bernt",
+            "Per Jonas"
+        ];
 
-}
+    }
 
-if(avdeling==="Nordre"){
+    if(avdeling==="Nordre"){
 
-medlemmer=[
-"Johanne",
-"Einar&Thea",
-"Agnete"
-];
+        medlemmer = [
+            "Johanne",
+            "Einar&Thea",
+            "Agnete"
+        ];
 
-}
+    }
 
-let html = `
-<div class="tilbake" onclick="visForside()">
-← Tilbake
-</div>
-`;
+    let html = `
 
-medlemmer.forEach(medlem=>{
+    <div class="tilbake"
+    onclick="visForside()">
 
-let gjenstar =
-medlemmerData.find(
-m=>m.Medlem===medlem
-);
+    ← Tilbake
 
-html += `
+    </div>
 
-<div class="medlem">
+    `;
 
-<h2>${medlem}</h2>
+    medlemmer.forEach(medlem => {
 
-<p>
-Gjenstår:
-${gjenstar ? Object.values(gjenstar)[1] : "-"}
-søyer
-</p>
+        let gjenstar =
+        medlemmerData.find(
+            m => m.Medlem === medlem
+        );
 
-`;
+        let gjenstarVerdi =
+        gjenstar
+        ? Object.values(gjenstar)[1]
+        : "-";
 
-vaerData
-.filter(v=>v.Hos===medlem)
-.forEach(v=>{
+        html += `
 
-html += `
+        <div class="medlem">
 
-<div class="vaer"
-onclick="visVaer('${v["Kåringsnr"]}')">
+        <h2>${medlem}</h2>
 
-<span>${v["Vær"]}</span>
+        <p>
+        Gjenstår:
+        ${gjenstarVerdi}
+        søyer
+        </p>
 
-<span>→</span>
+        `;
 
-</div>
+        vaerData
+        .filter(v => v.Hos === medlem)
+        .forEach(v => {
 
-`;
+            html += `
 
-});
+            <div class="vaer"
+            onclick="visVaer('${v["Kåringsnr"]}')">
 
-html += `
-</div>
-`;
+                <span>${v["Vær"]}</span>
 
-});
+                <span class="parringer">
+                0
+                </span>
 
-document.getElementById("app").innerHTML = html;
+            </div>
+
+            `;
+
+        });
+
+        html += `
+
+        </div>
+
+        `;
+
+    });
+
+    document.getElementById("app").innerHTML = html;
 
 }
 
 function visVaer(karingsnr){
 
-let vaer=
-vaerData.find(
-v=>v["Kåringsnr"]===karingsnr
-);
+    let vaer =
+    vaerData.find(
+        v => v["Kåringsnr"] === karingsnr
+    );
 
-document.getElementById("app").innerHTML = `
+    document.getElementById("app").innerHTML = `
 
-<div class="tilbake" onclick="history.back()">
-← Tilbake
-</div>
+    <div class="tilbake"
+    onclick="visForside()">
 
-<div class="info">
+    ← Tilbake
 
-<h2>${vaer["Vær"]}</h2>
+    </div>
 
-<p>
-<b>Kåringsnr:</b>
-${vaer["Kåringsnr"]}
-</p>
+    <div class="info">
 
-<p>
-<b>Hos:</b>
-${vaer["Hos"]}
-</p>
+        <h2>${vaer["Vær"]}</h2>
 
-<hr>
+        <p>
 
-<h3>Parringer pr medlem</h3>
+        <b>Kåringsnr:</b>
+        ${vaer["Kåringsnr"]}
 
-<p>
-Kommer i neste versjon når vi kobler inn dataene fra import.csv.
-</p>
+        </p>
 
-<p>
+        <p>
 
-Per-Joar: 0<br>
-Bernt: 0<br>
-Per Jonas: 0<br>
-Johanne: 0<br>
-Agnete: 0<br>
-Einar&Thea: 0
+        <b>Hos:</b>
+        ${vaer["Hos"]}
 
-</p>
+        </p>
 
-</div>
+        <hr>
 
-`;
+        <h3>
+        Parringer pr medlem
+        </h3>
+
+        <table>
+
+            <tr>
+                <td>Per-Joar</td>
+                <td align="right">0</td>
+            </tr>
+
+            <tr>
+                <td>Bernt</td>
+                <td align="right">0</td>
+            </tr>
+
+            <tr>
+                <td>Per Jonas</td>
+                <td align="right">0</td>
+            </tr>
+
+            <tr>
+                <td>Johanne</td>
+                <td align="right">0</td>
+            </tr>
+
+            <tr>
+                <td>Agnete</td>
+                <td align="right">0</td>
+            </tr>
+
+            <tr>
+                <td>Einar&Thea</td>
+                <td align="right">0</td>
+            </tr>
+
+            <tr>
+                <td><b>Totalt</b></td>
+                <td align="right"><b>0</b></td>
+            </tr>
+
+        </table>
+
+    </div>
+
+    `;
 
 }
 
