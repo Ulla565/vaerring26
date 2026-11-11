@@ -18,7 +18,6 @@ body{
 
 h1{
     text-align:center;
-    margin-bottom:30px;
 }
 
 .hoved{
@@ -28,7 +27,6 @@ h1{
 
 .under{
     font-size:22px;
-    font-weight:normal;
 }
 
 .knapp{
@@ -53,20 +51,15 @@ h1{
 .vaer{
     display:flex;
     justify-content:space-between;
-    align-items:center;
     padding:10px 0;
+    border-bottom:1px solid #ddd;
     cursor:pointer;
-    border-bottom:1px solid #eee;
-}
-
-.vaer:hover{
-    background:#fafafa;
 }
 
 .tilbake{
-    margin-bottom:20px;
     cursor:pointer;
     color:blue;
+    margin-bottom:20px;
     font-weight:bold;
 }
 
@@ -76,50 +69,34 @@ h1{
     border-radius:10px;
 }
 
-.parringer{
-    font-weight:bold;
-}
-
-table{
-    width:100%;
-    border-collapse:collapse;
-}
-
-td{
-    padding:8px;
-    border-bottom:1px solid #eee;
-}
-
 </style>
 </head>
 
 <body>
 
-<div id="app">Laster...</div>
+<div id="app">
+Laster...
+</div>
 
 <script>
 
-let medlemmerData = [];
 let vaerData = [];
+let medlemmerData = [];
+let importData = "";
 
 Promise.all([
-    fetch("appdata_test.csv").then(r => r.text()),
-    fetch("medlemmer.csv").then(r => r.text())
+    fetch("appdata_test.csv").then(r=>r.text()),
+    fetch("medlemmer.csv").then(r=>r.text()),
+    fetch("import.csv").then(r=>r.text())
 ])
 
-.then(([appdata, medlemmer]) => {
+.then(([appdata, medlemmer, importcsv])=>{
 
     vaerData = parseCSV(appdata);
     medlemmerData = parseCSV(medlemmer);
+    importData = importcsv;
 
     visForside();
-
-})
-
-.catch(error => {
-
-    document.getElementById("app").innerHTML =
-    "<h2>Feil ved innlasting</h2><p>" + error + "</p>";
 
 });
 
@@ -129,13 +106,13 @@ function parseCSV(csv){
 
     let headers = rows[0].split(",");
 
-    return rows.slice(1).map(row => {
+    return rows.slice(1).map(row=>{
 
         let values = row.split(",");
 
         let obj = {};
 
-        headers.forEach((h,i) => {
+        headers.forEach((h,i)=>{
 
             obj[h.trim()] = values[i]?.trim() || "";
 
@@ -150,16 +127,14 @@ function parseCSV(csv){
 function visForside(){
 
     let sondre =
-    vaerData.filter(v =>
+        vaerData.filter(v =>
         ["Per-Joar","Bernt","Per Jonas"]
-        .includes(v.Hos)
-    ).length;
+        .includes(v.Hos)).length;
 
     let nordre =
-    vaerData.filter(v =>
+        vaerData.filter(v =>
         ["Johanne","Einar&Thea","Agnete"]
-        .includes(v.Hos)
-    ).length;
+        .includes(v.Hos)).length;
 
     document.getElementById("app").innerHTML = `
 
@@ -176,18 +151,18 @@ function visForside(){
     </h1>
 
     <div class="knapp"
-    onclick="visAvdeling('Søndre')">
+         onclick="visAvdeling('Søndre')">
 
-    SØNDRE AVD.<br>
-    ${sondre} værer
+        SØNDRE AVD.<br>
+        ${sondre} værer
 
     </div>
 
     <div class="knapp"
-    onclick="visAvdeling('Nordre')">
+         onclick="visAvdeling('Nordre')">
 
-    NORDRE AVD.<br>
-    ${nordre} værer
+        NORDRE AVD.<br>
+        ${nordre} værer
 
     </div>
 
@@ -197,11 +172,11 @@ function visForside(){
 
 function visAvdeling(avdeling){
 
-    let medlemmer = [];
+    let medlemmer=[];
 
     if(avdeling==="Søndre"){
 
-        medlemmer = [
+        medlemmer=[
             "Per-Joar",
             "Bernt",
             "Per Jonas"
@@ -211,7 +186,7 @@ function visAvdeling(avdeling){
 
     if(avdeling==="Nordre"){
 
-        medlemmer = [
+        medlemmer=[
             "Johanne",
             "Einar&Thea",
             "Agnete"
@@ -219,57 +194,57 @@ function visAvdeling(avdeling){
 
     }
 
-    let html = `
+    let html=`
 
     <div class="tilbake"
-    onclick="visForside()">
+         onclick="visForside()">
 
-    ← Tilbake
+        ← Tilbake
 
     </div>
 
     `;
 
-    medlemmer.forEach(medlem => {
+    medlemmer.forEach(medlem=>{
 
         let gjenstar =
-        medlemmerData.find(
-            m => m.Medlem === medlem
-        );
-
-        let gjenstarVerdi =
-        gjenstar
-        ? Object.values(gjenstar)[1]
-        : "-";
+            medlemmerData.find(
+                m=>m.Medlem===medlem
+            );
 
         html += `
 
         <div class="medlem">
 
-        <h2>${medlem}</h2>
+            <h2>${medlem}</h2>
 
-        <p>
-        Gjenstår:
-        ${gjenstarVerdi}
-        søyer
-        </p>
+            <p>
+
+                Gjenstår:
+                ${gjenstar ? Object.values(gjenstar)[1] : "-"}
+
+                søyer
+
+            </p>
 
         `;
 
         vaerData
-        .filter(v => v.Hos === medlem)
-        .forEach(v => {
+        .filter(v=>v.Hos===medlem)
+        .forEach(v=>{
 
             html += `
 
             <div class="vaer"
-            onclick="visVaer('${v["Kåringsnr"]}')">
+                 onclick="visVaer('${v["Kåringsnr"]}')">
 
-                <span>${v["Vær"]}</span>
-
-                <span class="parringer">
-                0
+                <span>
+                ${v["Vær"]}
                 </span>
+
+                <strong>
+                0
+                </strong>
 
             </div>
 
@@ -278,9 +253,7 @@ function visAvdeling(avdeling){
         });
 
         html += `
-
         </div>
-
         `;
 
     });
@@ -292,22 +265,27 @@ function visAvdeling(avdeling){
 function visVaer(karingsnr){
 
     let vaer =
-    vaerData.find(
-        v => v["Kåringsnr"] === karingsnr
-    );
+        vaerData.find(
+            v=>v["Kåringsnr"]===karingsnr
+        );
+
+    let funnet =
+        importData.includes(karingsnr);
 
     document.getElementById("app").innerHTML = `
 
     <div class="tilbake"
-    onclick="visForside()">
+         onclick="history.back()">
 
-    ← Tilbake
+        ← Tilbake
 
     </div>
 
     <div class="info">
 
-        <h2>${vaer["Vær"]}</h2>
+        <h2>
+        ${vaer["Vær"]}
+        </h2>
 
         <p>
 
@@ -326,47 +304,20 @@ function visVaer(karingsnr){
         <hr>
 
         <h3>
-        Parringer pr medlem
+        Animalia-test
         </h3>
 
-        <table>
+        <p>
 
-            <tr>
-                <td>Per-Joar</td>
-                <td align="right">0</td>
-            </tr>
+        Kåringsnummer i import.csv:
 
-            <tr>
-                <td>Bernt</td>
-                <td align="right">0</td>
-            </tr>
+        <b style="color:${funnet ? 'green' : 'red'}">
 
-            <tr>
-                <td>Per Jonas</td>
-                <td align="right">0</td>
-            </tr>
+        ${funnet ? 'FUNNET' : 'IKKE FUNNET'}
 
-            <tr>
-                <td>Johanne</td>
-                <td align="right">0</td>
-            </tr>
+        </b>
 
-            <tr>
-                <td>Agnete</td>
-                <td align="right">0</td>
-            </tr>
-
-            <tr>
-                <td>Einar&Thea</td>
-                <td align="right">0</td>
-            </tr>
-
-            <tr>
-                <td><b>Totalt</b></td>
-                <td align="right"><b>0</b></td>
-            </tr>
-
-        </table>
+        </p>
 
     </div>
 
