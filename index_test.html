@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<title>Værring 2026</title>
+<title>Værringen Ringsaker 2026</title>
 
 <style>
 
@@ -19,6 +19,17 @@ margin:auto;
 
 h1{
 text-align:center;
+margin-bottom:30px;
+}
+
+.hoved{
+font-size:38px;
+font-weight:bold;
+}
+
+.under{
+font-size:22px;
+font-weight:normal;
 }
 
 .knapp{
@@ -43,13 +54,26 @@ border-radius:10px;
 .vaer{
 display:flex;
 justify-content:space-between;
-padding:3px 0;
+padding:10px 0;
+cursor:pointer;
+border-bottom:1px solid #eee;
+}
+
+.vaer:hover{
+background:#fafafa;
 }
 
 .tilbake{
 margin-bottom:20px;
 cursor:pointer;
 color:blue;
+font-weight:bold;
+}
+
+.info{
+background:white;
+padding:20px;
+border-radius:10px;
 }
 
 </style>
@@ -66,14 +90,14 @@ let medlemmerData=[];
 let vaerData=[];
 
 Promise.all([
-fetch("appdata.csv").then(r=>r.text()),
+fetch("appdata_test.csv").then(r=>r.text()),
 fetch("medlemmer.csv").then(r=>r.text())
 ])
 
 .then(([appdata, medlemmer])=>{
 
-vaerData = parseCSV(appdata);
-medlemmerData = parseCSV(medlemmer);
+vaerData=parseCSV(appdata);
+medlemmerData=parseCSV(medlemmer);
 
 visForside();
 
@@ -81,19 +105,19 @@ visForside();
 
 function parseCSV(csv){
 
-let rows = csv.trim().split("\n");
+let rows=csv.trim().split("\n");
 
-let headers = rows[0].split(",");
+let headers=rows[0].split(",");
 
 return rows.slice(1).map(row=>{
 
-let values = row.split(",");
+let values=row.split(",");
 
-let obj = {};
+let obj={};
 
 headers.forEach((h,i)=>{
 
-obj[h.trim()] = values[i]?.trim();
+obj[h.trim()] = values[i]?.trim() || "";
 
 });
 
@@ -105,20 +129,46 @@ return obj;
 
 function visForside(){
 
+let sondre =
+vaerData.filter(v=>
+["Per-Joar","Bernt","Per Jonas"]
+.includes(v.Hos)
+).length;
+
+let nordre =
+vaerData.filter(v=>
+["Johanne","Einar&Thea","Agnete"]
+.includes(v.Hos)
+).length;
+
 document.getElementById("app").innerHTML=`
 
-<h1>VÆRRING 2026</h1>
+<h1>
+
+<div class="hoved">
+VÆRRINGEN
+</div>
+
+<div class="under">
+RINGSAKER 2026
+</div>
+
+</h1>
 
 <div class="knapp"
 onclick="visAvdeling('Søndre')">
 
-SØNDRE AVD.
+SØNDRE AVD.<br>
+${sondre} værer
+
 </div>
 
 <div class="knapp"
 onclick="visAvdeling('Nordre')">
 
-NORDRE AVD.
+NORDRE AVD.<br>
+${nordre} værer
+
 </div>
 
 `;
@@ -127,7 +177,7 @@ NORDRE AVD.
 
 function visAvdeling(avdeling){
 
-let medlemmer = [];
+let medlemmer=[];
 
 if(avdeling==="Søndre"){
 
@@ -150,28 +200,38 @@ medlemmer=[
 }
 
 let html=`
+
 <div class="tilbake"
 onclick="visForside()">
+
 ← Tilbake
+
 </div>
+
 `;
 
 medlemmer.forEach(medlem=>{
 
-let gjenstar = medlemmerData.find(
+let gjenstar =
+medlemmerData.find(
 m=>m.Medlem===medlem
 );
 
 html+=`
+
 <div class="medlem">
 
 <h2>${medlem}</h2>
 
 <p>
+
 Gjenstår:
 ${gjenstar ? gjenstar.Gjenstår : "-"}
+
 søyer
+
 </p>
+
 `;
 
 vaerData
@@ -179,20 +239,25 @@ vaerData
 .forEach(v=>{
 
 html+=`
-<div class="vaer">
+
+<div class="vaer"
+onclick="visVaer('${v["Kåringsnr"]}')">
 
 <span>${v["Vær"]}</span>
 
-<strong>
-${v.Parringer}
-</strong>
+<span>→</span>
 
 </div>
+
 `;
 
 });
 
-html+=`</div>`;
+html+=`
+
+</div>
+
+`;
 
 });
 
@@ -200,7 +265,49 @@ document.getElementById("app").innerHTML=html;
 
 }
 
-</script>
+function visVaer(karingsnr){
 
-</body>
-</html>
+let vaer=
+vaerData.find(
+v=>v["Kåringsnr"]===karingsnr
+);
+
+document.getElementById("app").innerHTML=`
+
+<div class="tilbake"
+onclick="visForside()">
+
+← Tilbake
+
+</div>
+
+<div class="info">
+
+<h2>${vaer["Vær"]}</h2>
+
+<p>
+
+<b>Kåringsnr:</b>
+${vaer["Kåringsnr"]}
+
+</p>
+
+<p>
+
+<b>Hos:</b>
+${vaer["Hos"]}
+
+</p>
+
+<hr>
+
+<h3>
+
+Parringer pr medlem
+
+</h3>
+
+<p>
+
+Denne delen kobles mot
+Animal
