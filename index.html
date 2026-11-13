@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Værringen Ringsaker 2026</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#5fa832">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Værringen">
 <style>
 body{font-family:Arial,sans-serif;background:#f3f3f3;padding:20px;max-width:800px;margin:auto}
 h1{text-align:center}
@@ -27,6 +34,7 @@ h1{text-align:center}
 .fyll{height:100%;border-radius:4px}
 html,body{overscroll-behavior-y:contain}
 #pull{position:fixed;top:0;left:0;right:0;text-align:center;padding:8px;font-size:14px;color:#555;opacity:0;pointer-events:none;transform:translateY(-34px);transition:opacity .2s;z-index:10}
+.installer{display:block;padding:14px;background:#5fa832;color:white;margin:20px 0;border-radius:10px;text-align:center;font-size:18px;font-weight:bold;cursor:pointer}
 .bunn{text-align:center;color:#777;font-size:13px;margin-top:30px;line-height:1.6}
 .mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
 table{border-collapse:collapse;width:100%}
@@ -181,7 +189,8 @@ function visForside() {
         ${a.toUpperCase()} AVD.<br>${antall(a)} værer
     </div>`).join("")}
     ${imp ? `
-    <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>` : ""}`;
+    <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>` : ""}
+    ${installKnapp()}`;
 }
 
 function visAvdeling(avd) {
@@ -278,6 +287,46 @@ function visTotal() {
             <div class="mal" style="left:${malPos}%"></div>
         </div>
     </div>`).join("")}`;
+}
+
+// ---------- Installer som app ----------
+let installPrompt = null;   // settes av Chrome/Android når appen kan installeres direkte
+
+const erApp = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const erIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+window.addEventListener("beforeinstallprompt", e => {
+    e.preventDefault();
+    installPrompt = e;
+    if (visning === visForside) visForside();
+});
+window.addEventListener("appinstalled", () => {
+    installPrompt = null;
+    if (visning === visForside) visForside();
+});
+
+function installKnapp() {
+    const mobil = erIOS() || /android/i.test(navigator.userAgent);
+    if (erApp() || !(installPrompt || mobil)) return "";   // skjules når den allerede er en app
+    const hjelp = erIOS()
+        ? "Trykk på Del-ikonet (firkanten med pil opp) i Safari, velg «Legg til på Hjem-skjerm», og trykk «Legg til»."
+        : "Åpne nettleserens meny (⋮) og velg «Installer app» eller «Legg til på startskjermen».";
+    return `
+    <div class="installer" onclick="installer()">Last ned som app</div>
+    <div id="installHjelp" class="feil" style="display:none">${hjelp}</div>`;
+}
+
+async function installer() {
+    if (installPrompt) {
+        installPrompt.prompt();
+        await installPrompt.userChoice;
+        installPrompt = null;
+        visForside();
+    } else {
+        const h = document.getElementById("installHjelp");
+        if (h) h.style.display = "block";
+    }
 }
 
 // ---------- Oppstart ----------
