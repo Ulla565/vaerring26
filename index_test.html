@@ -206,12 +206,10 @@ function visVaer(karingsnr, avd) {
         <p><b>Kåringsnr:</b> ${esc(vaer["Kåringsnr"])}</p>
         <p><b>Hos:</b> ${esc(vaer["Hos"])}</p>
         <hr>
-        <h3>Animalia</h3>
-        <p>Funnet i import.csv:
-            <b style="color:${info ? "green" : "red"}">${info ? "FUNNET" : "IKKE FUNNET"}</b></p>
         ${info ? `
         <p><b>Netto paringer:</b> ${info.netto}</p>
-        ${rader ? `<table>${rader}</table>` : "<p>Ingen paringer registrert.</p>"}` : ""}
+        ${rader ? `<table>${rader}</table>` : "<p>Ingen paringer registrert.</p>"}`
+        : `<p style="color:red">Fant ikke denne væren i import.csv.</p>`}
     </div>`;
 }
 
