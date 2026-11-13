@@ -25,6 +25,7 @@ h1{text-align:center}
 .sl small{color:#777}
 .spor{position:relative;height:20px;background:#e6e6e6;border-radius:4px}
 .fyll{height:100%;border-radius:4px}
+.bunn{text-align:center;color:#777;font-size:13px;margin-top:30px;line-height:1.6}
 .mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
 table{border-collapse:collapse;width:100%}
 td{padding:6px 4px;border-bottom:1px solid #eee}
@@ -33,6 +34,11 @@ td:last-child{text-align:right;font-weight:bold}
 </head>
 <body>
 <div id="app">Laster...</div>
+
+<div class="bunn">
+    <div id="sist"></div>
+    <div>Utviklet av Johanne Ulrica Øveraasen &copy; 2026</div>
+</div>
 
 <script>
 // Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
@@ -268,18 +274,29 @@ function visTotal() {
 
 // ---------- Oppstart ----------
 function hent(fil) {
-    return fetch(fil).then(r => {
+    // no-store: sikrer at ny import.csv vises med en gang, ikke en hurtiglagret versjon
+    return fetch(fil, { cache: "no-store" }).then(r => {
         if (!r.ok) throw new Error(`${fil}: HTTP ${r.status}`);
-        return r.text();
+        return r.text().then(text => ({ text, modified: r.headers.get("Last-Modified") }));
     });
 }
 
-Promise.allSettled([hent("appdata_test.csv"), hent("import.csv")]).then(([a, i]) => {
-    if (a.status === "fulfilled") vaerData = tilObjekter(parseCSV(a.value));
-    else advarsler.push("Kunne ikke lese appdata_test.csv.");
+Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
+    if (a.status === "fulfilled") vaerData = tilObjekter(parseCSV(a.value.text));
+    else advarsler.push("Kunne ikke lese appdata.csv.");
 
     if (i.status === "fulfilled") {
-        imp = tolkImport(parseCSV(i.value));
+        imp = tolkImport(parseCSV(i.value.text));
+
+        // «Sist oppdatert» hentes fra tidspunktet import.csv sist ble endret på serveren
+        const d = new Date(i.value.modified);
+        if (i.value.modified && !isNaN(d)) {
+            document.getElementById("sist").textContent = "Sist oppdatert: " +
+                d.toLocaleString("nb-NO", {
+                    day: "numeric", month: "long", year: "numeric",
+                    hour: "2-digit", minute: "2-digit", timeZone: "Europe/Oslo"
+                });
+        }
         if (!imp) advarsler.push("Fant ikke produsentene i import.csv. Er filen riktig eksportert?");
     } else advarsler.push("Kunne ikke lese import.csv.");
 
