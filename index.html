@@ -1,206 +1,290 @@
 <!DOCTYPE html>
 <html lang="no">
-
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
-<title>Værring 2026</title>
-
+<title>Værringen Ringsaker 2026</title>
 <style>
-
-body{
-font-family:Arial,sans-serif;
-background:#f3f3f3;
-padding:20px;
-max-width:800px;
-margin:auto;
-}
-
-h1{
-text-align:center;
-}
-
-.knapp{
-display:block;
-padding:20px;
-background:white;
-margin:20px 0;
-border-radius:10px;
-text-align:center;
-font-size:24px;
-font-weight:bold;
-cursor:pointer;
-}
-
-.medlem{
-background:white;
-padding:15px;
-margin-bottom:15px;
-border-radius:10px;
-}
-
-.vaer{
-display:flex;
-justify-content:space-between;
-padding:3px 0;
-}
-
-.tilbake{
-margin-bottom:20px;
-cursor:pointer;
-color:blue;
-}
-
+body{font-family:Arial,sans-serif;background:#f3f3f3;padding:20px;max-width:800px;margin:auto}
+h1{text-align:center}
+.hoved{font-size:38px;font-weight:bold}
+.under{font-size:22px}
+.knapp{display:block;padding:20px;background:white;margin:20px 0;border-radius:10px;text-align:center;font-size:24px;font-weight:bold;cursor:pointer}
+.medlem{background:white;padding:15px;margin-bottom:15px;border-radius:10px}
+.medlem h2{margin:0 0 8px}
+.stat{color:#555;font-size:15px;margin:2px 0}
+.vaer{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #ddd;cursor:pointer}
+.tilbake{cursor:pointer;color:blue;margin-bottom:20px;font-weight:bold}
+.info{background:white;padding:20px;border-radius:10px}
+.feil{background:#fff3cd;padding:12px;border-radius:8px;margin-bottom:15px}
+.tall{display:flex;gap:10px;margin-bottom:15px}
+.tall div{flex:1;background:white;border-radius:10px;padding:12px;text-align:center;font-size:14px;color:#555}
+.tall b{display:block;font-size:28px;color:#000}
+.sr{background:white;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.sl{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+.sl small{color:#777}
+.spor{position:relative;height:20px;background:#e6e6e6;border-radius:4px}
+.fyll{height:100%;border-radius:4px}
+.mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
+table{border-collapse:collapse;width:100%}
+td{padding:6px 4px;border-bottom:1px solid #eee}
+td:last-child{text-align:right;font-weight:bold}
 </style>
-
 </head>
-
 <body>
-
-<div id="app"></div>
+<div id="app">Laster...</div>
 
 <script>
-
-let medlemmerData=[];
-let vaerData=[];
-
-Promise.all([
-fetch("appdata.csv").then(r=>r.text()),
-fetch("medlemmer.csv").then(r=>r.text())
-])
-
-.then(([appdata, medlemmer])=>{
-
-vaerData = parseCSV(appdata);
-medlemmerData = parseCSV(medlemmer);
-
-visForside();
-
-});
-
-function parseCSV(csv){
-
-let rows = csv.trim().split("\n");
-
-let headers = rows[0].split(",");
-
-return rows.slice(1).map(row=>{
-
-let values = row.split(",");
-
-let obj = {};
-
-headers.forEach((h,i)=>{
-
-obj[h.trim()] = values[i]?.trim();
-
-});
-
-return obj;
-
-});
-
-}
-
-function visForside(){
-
-document.getElementById("app").innerHTML=`
-
-<h1>VÆRRING 2026</h1>
-
-<div class="knapp"
-onclick="visAvdeling('Søndre')">
-
-SØNDRE AVD.
-</div>
-
-<div class="knapp"
-onclick="visAvdeling('Nordre')">
-
-NORDRE AVD.
-</div>
-
-`;
-
-}
-
-function visAvdeling(avdeling){
-
-let medlemmer = [];
-
-if(avdeling==="Søndre"){
-
-medlemmer=[
-"Per-Joar",
-"Bernt",
-"Per Jonas"
+// Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
+const MEDLEMMER = [
+    { navn: "Per-Joar",   id: "3411086147", avd: "Søndre" },
+    { navn: "Bernt",      id: "3411089273", avd: "Søndre" },
+    { navn: "Per Jonas",  id: "3414036784", avd: "Søndre" },
+    { navn: "Johanne",    id: "3411074028", avd: "Nordre" },
+    { navn: "Einar&Thea", id: "3411010535", avd: "Nordre" },
+    { navn: "Agnete",     id: "3411061082", avd: "Nordre" }
 ];
+const AVDELINGER = ["Søndre", "Nordre"];
 
+let vaerData = [];
+let imp = null;      // tolket import.csv, eller null
+let advarsler = [];
+
+function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
 }
 
-if(avdeling==="Nordre"){
+// ---------- CSV ----------
+// Håndterer anførselstegn, linjeskift inni celler og komma/semikolon/tab som skilletegn.
+function parseCSV(text) {
+    text = text.replace(/^\uFEFF/, "");
+    const sample = text.slice(0, 3000);
+    const delim = [",", ";", "\t"]
+        .map(d => [d, sample.split(d).length])
+        .sort((a, b) => b[1] - a[1])[0][0];
 
-medlemmer=[
-"Johanne",
-"Einar&Thea",
-"Agnete"
-];
+    const rows = [];
+    let row = [], cell = "", q = false;
 
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (q) {
+            if (c === '"') {
+                if (text[i + 1] === '"') { cell += '"'; i++; }
+                else q = false;
+            } else cell += c;
+        } else if (c === '"') {
+            q = true;
+        } else if (c === delim) {
+            row.push(cell); cell = "";
+        } else if (c === "\n" || c === "\r") {
+            if (c === "\r" && text[i + 1] === "\n") i++;
+            row.push(cell); rows.push(row);
+            row = []; cell = "";
+        } else cell += c;
+    }
+    if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+    return rows.map(r => r.map(c => c.trim()));
 }
 
-let html=`
-<div class="tilbake"
-onclick="visForside()">
-← Tilbake
-</div>
-`;
+function tilObjekter(rows) {
+    if (!rows.length) return [];
+    const headers = rows[0].map(h => h.trim());
+    return rows.slice(1)
+        .filter(r => r.some(c => c !== ""))
+        .map(r => {
+            const o = {};
+            headers.forEach((h, i) => { o[h] = (r[i] ?? "").trim(); });
+            return o;
+        });
+}
 
-medlemmer.forEach(medlem=>{
+const num = s => parseInt(String(s ?? "").replace(/[\s%]/g, ""), 10) || 0;
+const rens = s => String(s ?? "").replace(/\s+/g, " ").trim();
 
-let gjenstar = medlemmerData.find(
-m=>m.Medlem===medlem
-);
+// ---------- Tolking av import.csv (Sauekontrollen-eksport) ----------
+function tolkImport(rows) {
+    // Overskriftsraden er den som inneholder flest produsent-ID-er
+    let hdrIdx = -1, best = 0;
+    rows.forEach((r, i) => {
+        const treff = MEDLEMMER.filter(m => r.some(c => c.includes(m.id))).length;
+        if (treff > best) { best = treff; hdrIdx = i; }
+    });
+    if (hdrIdx < 0 || best < 3) return null;
 
-html+=`
-<div class="medlem">
+    const hdr = rows[hdrIdx];
+    const kol = {};
+    MEDLEMMER.forEach(m => { kol[m.id] = hdr.findIndex(c => c.includes(m.id)); });
+    const nettoKol = hdr.findIndex(c => rens(c).toLowerCase().startsWith("netto paringer"));
 
-<h2>${medlem}</h2>
+    const res = { vaerer: {}, medlem: {} };
+    MEDLEMMER.forEach(m => { res.medlem[m.id] = { netto: 0, andre: 0, soyer: 0, mangler: 0 }; });
 
-<p>
-Gjenstår:
-${gjenstar ? gjenstar.Gjenstår : "-"}
-søyer
-</p>
-`;
+    const settMedlem = (felt, r) => {
+        MEDLEMMER.forEach(m => {
+            if (kol[m.id] >= 0) res.medlem[m.id][felt] = num(r[kol[m.id]]);
+        });
+    };
 
-vaerData
-.filter(v=>v.Hos===medlem)
-.forEach(v=>{
+    for (const r of rows.slice(hdrIdx + 1)) {
+        const label = rens(r[0]);
+        const lower = label.toLowerCase();
+        const nr = (label.match(/\d{9,}/) || [])[0];
 
-html+=`
-<div class="vaer">
+        if (nr) {
+            const per = {};
+            let sum = 0;
+            MEDLEMMER.forEach(m => {
+                const v = kol[m.id] >= 0 ? num(r[kol[m.id]]) : 0;
+                per[m.id] = v; sum += v;
+            });
+            res.vaerer[nr] = {
+                navn: label.replace(nr, "").trim(),
+                netto: nettoKol >= 0 ? num(r[nettoKol]) : sum,
+                perProdusent: per
+            };
+        } else if (lower.startsWith("netto paringer")) settMedlem("netto", r);
+        else if (lower.startsWith("sum andre")) settMedlem("andre", r);
+        else if (lower.startsWith("antall avlss")) settMedlem("soyer", r);
+        else if (lower.startsWith("mangler paring")) settMedlem("mangler", r);
+    }
+    return res;
+}
 
-<span>${v["Vær"]}</span>
+// ---------- Visning ----------
+function visForside() {
+    const antall = avd => MEDLEMMER
+        .filter(m => m.avd === avd)
+        .reduce((s, m) => s + vaerData.filter(v => v["Hos"] === m.navn).length, 0);
 
-<strong>
-${v.Parringer}
-</strong>
+    document.getElementById("app").innerHTML = `
+    ${advarsler.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
+    <h1>
+        <div class="hoved">VÆRRINGEN</div>
+        <div class="under">RINGSAKER 2026</div>
+    </h1>
+    ${AVDELINGER.map(a => `
+    <div class="knapp" onclick="visAvdeling('${a}')">
+        ${a.toUpperCase()} AVD.<br>${antall(a)} værer
+    </div>`).join("")}
+    ${imp ? `
+    <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>` : ""}`;
+}
 
-</div>
-`;
+function visAvdeling(avd) {
+    let html = `<div class="tilbake" onclick="visForside()">← Tilbake</div>`;
 
+    MEDLEMMER.filter(m => m.avd === avd).forEach(m => {
+        const s = imp ? imp.medlem[m.id] : null;
+        html += `
+        <div class="medlem">
+            <h2>${esc(m.navn)}</h2>
+            <p class="stat"><b>Gjenstår:</b> ${s ? s.mangler : "-"} søyer
+               (av ${s ? s.soyer : "-"} avlssøyer)</p>
+            <p class="stat"><b>Netto paringer:</b> ${s ? s.netto : "-"}
+               ${s && s.andre ? `(hvorav ${s.andre} på andre værer)` : ""}</p>`;
+
+        vaerData.filter(v => v["Hos"] === m.navn).forEach(v => {
+            const info = imp ? imp.vaerer[v["Kåringsnr"]] : null;
+            html += `
+            <div class="vaer" onclick="visVaer('${esc(v["Kåringsnr"])}', '${avd}')">
+                <span>${esc(v["Vær"])}</span>
+                <strong>${info ? info.netto : "-"}</strong>
+            </div>`;
+        });
+        html += `</div>`;
+    });
+
+    document.getElementById("app").innerHTML = html;
+}
+
+function visVaer(karingsnr, avd) {
+    const vaer = vaerData.find(v => v["Kåringsnr"] === karingsnr);
+    if (!vaer) { visForside(); return; }
+    const info = imp ? imp.vaerer[karingsnr] : null;
+
+    const rader = info
+        ? MEDLEMMER.filter(m => info.perProdusent[m.id] > 0)
+            .map(m => `<tr><td>${esc(m.navn)}</td><td>${info.perProdusent[m.id]}</td></tr>`).join("")
+        : "";
+
+    document.getElementById("app").innerHTML = `
+    <div class="tilbake" onclick="${avd === "total" ? "visTotal()" : `visAvdeling('${avd}')`}">← Tilbake</div>
+    <div class="info">
+        <h2>${esc(vaer["Vær"])}</h2>
+        <p><b>Kåringsnr:</b> ${esc(vaer["Kåringsnr"])}</p>
+        <p><b>Hos:</b> ${esc(vaer["Hos"])}</p>
+        <hr>
+        ${info ? `
+        <p><b>Netto paringer:</b> ${info.netto}</p>
+        ${rader ? `<table>${rader}</table>` : "<p>Ingen paringer registrert.</p>"}`
+        : `<p style="color:red">Fant ikke denne væren i import.csv.</p>`}
+    </div>`;
+}
+
+// Totaloversikt: de 16 prøveværene, sortert med færrest paringer øverst.
+function visTotal() {
+    const MAL = 25;
+
+    const rader = Object.entries(imp.vaerer).map(([nr, v]) => {
+        const a = vaerData.find(x => x["Kåringsnr"] === nr);
+        return {
+            nr,
+            navn: a ? a["Vær"] : v.navn,
+            hos: a ? a["Hos"] : "",
+            netto: v.netto,
+            kjent: !!a
+        };
+    }).sort((x, y) => x.netto - y.netto || x.navn.localeCompare(y.navn, "no"));
+
+    const total = rader.reduce((s, r) => s + r.netto, 0);
+    const igjen = rader.reduce((s, r) => s + Math.max(0, MAL - r.netto), 0);
+    const nadd = rader.filter(r => r.netto >= MAL).length;
+    const maks = Math.max(MAL, ...rader.map(r => r.netto));
+    const malPos = MAL / maks * 100;
+
+    document.getElementById("app").innerHTML = `
+    <div class="tilbake" onclick="visForside()">← Tilbake</div>
+    <h2>Totaloversikt prøvevær</h2>
+    <div class="tall">
+        <div><b>${total}</b>paringer totalt</div>
+        <div><b>${nadd} / ${rader.length}</b>har nådd ${MAL}</div>
+        <div><b>${igjen}</b>gjenstår til mål</div>
+    </div>
+    ${rader.map(r => `
+    <div class="sr" ${r.kjent ? `onclick="visVaer('${esc(r.nr)}', 'total')"` : ""}>
+        <div class="sl">
+            <span>${esc(r.navn)} ${r.hos ? `<small>${esc(r.hos)}</small>` : ""}</span>
+            <b>${r.netto} / ${MAL}</b>
+        </div>
+        <div class="spor">
+            <div class="fyll" style="width:${r.netto / maks * 100}%;background:${r.netto >= MAL ? "#2e9e4f" : "#3b82f6"}"></div>
+            <div class="mal" style="left:${malPos}%"></div>
+        </div>
+    </div>`).join("")}`;
+}
+
+// ---------- Oppstart ----------
+function hent(fil) {
+    return fetch(fil).then(r => {
+        if (!r.ok) throw new Error(`${fil}: HTTP ${r.status}`);
+        return r.text();
+    });
+}
+
+Promise.allSettled([hent("appdata_test.csv"), hent("import.csv")]).then(([a, i]) => {
+    if (a.status === "fulfilled") vaerData = tilObjekter(parseCSV(a.value));
+    else advarsler.push("Kunne ikke lese appdata_test.csv.");
+
+    if (i.status === "fulfilled") {
+        imp = tolkImport(parseCSV(i.value));
+        if (!imp) advarsler.push("Fant ikke produsentene i import.csv. Er filen riktig eksportert?");
+    } else advarsler.push("Kunne ikke lese import.csv.");
+
+    visForside();
 });
-
-html+=`</div>`;
-
-});
-
-document.getElementById("app").innerHTML=html;
-
-}
-
 </script>
-
 </body>
 </html>
