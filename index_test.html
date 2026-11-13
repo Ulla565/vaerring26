@@ -3,329 +3,237 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
 <title>Værringen Ringsaker 2026</title>
-
 <style>
-
-body{
-    font-family:Arial,sans-serif;
-    background:#f3f3f3;
-    padding:20px;
-    max-width:800px;
-    margin:auto;
-}
-
-h1{
-    text-align:center;
-}
-
-.hoved{
-    font-size:38px;
-    font-weight:bold;
-}
-
-.under{
-    font-size:22px;
-}
-
-.knapp{
-    display:block;
-    padding:20px;
-    background:white;
-    margin:20px 0;
-    border-radius:10px;
-    text-align:center;
-    font-size:24px;
-    font-weight:bold;
-    cursor:pointer;
-}
-
-.medlem{
-    background:white;
-    padding:15px;
-    margin-bottom:15px;
-    border-radius:10px;
-}
-
-.vaer{
-    display:flex;
-    justify-content:space-between;
-    padding:10px 0;
-    border-bottom:1px solid #ddd;
-    cursor:pointer;
-}
-
-.tilbake{
-    cursor:pointer;
-    color:blue;
-    margin-bottom:20px;
-    font-weight:bold;
-}
-
-.info{
-    background:white;
-    padding:20px;
-    border-radius:10px;
-}
-
+body{font-family:Arial,sans-serif;background:#f3f3f3;padding:20px;max-width:800px;margin:auto}
+h1{text-align:center}
+.hoved{font-size:38px;font-weight:bold}
+.under{font-size:22px}
+.knapp{display:block;padding:20px;background:white;margin:20px 0;border-radius:10px;text-align:center;font-size:24px;font-weight:bold;cursor:pointer}
+.medlem{background:white;padding:15px;margin-bottom:15px;border-radius:10px}
+.medlem h2{margin:0 0 8px}
+.stat{color:#555;font-size:15px;margin:2px 0}
+.vaer{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #ddd;cursor:pointer}
+.tilbake{cursor:pointer;color:blue;margin-bottom:20px;font-weight:bold}
+.info{background:white;padding:20px;border-radius:10px}
+.feil{background:#fff3cd;padding:12px;border-radius:8px;margin-bottom:15px}
+table{border-collapse:collapse;width:100%}
+td{padding:6px 4px;border-bottom:1px solid #eee}
+td:last-child{text-align:right;font-weight:bold}
 </style>
 </head>
-
 <body>
-
-<div id="app">
-Laster...
-</div>
+<div id="app">Laster...</div>
 
 <script>
+// Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
+const MEDLEMMER = [
+    { navn: "Per-Joar",   id: "3411086147", avd: "Søndre" },
+    { navn: "Bernt",      id: "3411089273", avd: "Søndre" },
+    { navn: "Per Jonas",  id: "3414036784", avd: "Søndre" },
+    { navn: "Johanne",    id: "3411074028", avd: "Nordre" },
+    { navn: "Einar&Thea", id: "3411010535", avd: "Nordre" },
+    { navn: "Agnete",     id: "3411061082", avd: "Nordre" }
+];
+const AVDELINGER = ["Søndre", "Nordre"];
 
 let vaerData = [];
-let medlemmerData = [];
-let importData = "";
+let imp = null;      // tolket import.csv, eller null
+let advarsler = [];
 
-Promise.all([
-    fetch("appdata_test.csv").then(r=>r.text()),
-    fetch("medlemmer.csv").then(r=>r.text()),
-    fetch("import.csv").then(r=>r.text())
-])
-
-.then(([appdata, medlemmer, importcsv])=>{
-
-    vaerData = parseCSV(appdata);
-    medlemmerData = parseCSV(medlemmer);
-    importData = importcsv;
-
-    visForside();
-
-});
-
-function parseCSV(csv){
-
-    let rows = csv.trim().split(/\r?\n/);
-
-    let headers = rows[0].split(",");
-
-    return rows.slice(1).map(row=>{
-
-        let values = row.split(",");
-
-        let obj = {};
-
-        headers.forEach((h,i)=>{
-
-            obj[h.trim()] = values[i]?.trim() || "";
-
-        });
-
-        return obj;
-
-    });
-
+function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
 }
 
-function visForside(){
+// ---------- CSV ----------
+// Håndterer anførselstegn, linjeskift inni celler og komma/semikolon/tab som skilletegn.
+function parseCSV(text) {
+    text = text.replace(/^\uFEFF/, "");
+    const sample = text.slice(0, 3000);
+    const delim = [",", ";", "\t"]
+        .map(d => [d, sample.split(d).length])
+        .sort((a, b) => b[1] - a[1])[0][0];
 
-    let sondre =
-        vaerData.filter(v =>
-        ["Per-Joar","Bernt","Per Jonas"]
-        .includes(v.Hos)).length;
+    const rows = [];
+    let row = [], cell = "", q = false;
 
-    let nordre =
-        vaerData.filter(v =>
-        ["Johanne","Einar&Thea","Agnete"]
-        .includes(v.Hos)).length;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (q) {
+            if (c === '"') {
+                if (text[i + 1] === '"') { cell += '"'; i++; }
+                else q = false;
+            } else cell += c;
+        } else if (c === '"') {
+            q = true;
+        } else if (c === delim) {
+            row.push(cell); cell = "";
+        } else if (c === "\n" || c === "\r") {
+            if (c === "\r" && text[i + 1] === "\n") i++;
+            row.push(cell); rows.push(row);
+            row = []; cell = "";
+        } else cell += c;
+    }
+    if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+    return rows.map(r => r.map(c => c.trim()));
+}
+
+function tilObjekter(rows) {
+    if (!rows.length) return [];
+    const headers = rows[0].map(h => h.trim());
+    return rows.slice(1)
+        .filter(r => r.some(c => c !== ""))
+        .map(r => {
+            const o = {};
+            headers.forEach((h, i) => { o[h] = (r[i] ?? "").trim(); });
+            return o;
+        });
+}
+
+const num = s => parseInt(String(s ?? "").replace(/[\s%]/g, ""), 10) || 0;
+const rens = s => String(s ?? "").replace(/\s+/g, " ").trim();
+
+// ---------- Tolking av import.csv (Sauekontrollen-eksport) ----------
+function tolkImport(rows) {
+    // Overskriftsraden er den som inneholder flest produsent-ID-er
+    let hdrIdx = -1, best = 0;
+    rows.forEach((r, i) => {
+        const treff = MEDLEMMER.filter(m => r.some(c => c.includes(m.id))).length;
+        if (treff > best) { best = treff; hdrIdx = i; }
+    });
+    if (hdrIdx < 0 || best < 3) return null;
+
+    const hdr = rows[hdrIdx];
+    const kol = {};
+    MEDLEMMER.forEach(m => { kol[m.id] = hdr.findIndex(c => c.includes(m.id)); });
+    const nettoKol = hdr.findIndex(c => rens(c).toLowerCase().startsWith("netto paringer"));
+
+    const res = { vaerer: {}, medlem: {} };
+    MEDLEMMER.forEach(m => { res.medlem[m.id] = { netto: 0, andre: 0, soyer: 0, mangler: 0 }; });
+
+    const settMedlem = (felt, r) => {
+        MEDLEMMER.forEach(m => {
+            if (kol[m.id] >= 0) res.medlem[m.id][felt] = num(r[kol[m.id]]);
+        });
+    };
+
+    for (const r of rows.slice(hdrIdx + 1)) {
+        const label = rens(r[0]);
+        const lower = label.toLowerCase();
+        const nr = (label.match(/\d{9,}/) || [])[0];
+
+        if (nr) {
+            const per = {};
+            let sum = 0;
+            MEDLEMMER.forEach(m => {
+                const v = kol[m.id] >= 0 ? num(r[kol[m.id]]) : 0;
+                per[m.id] = v; sum += v;
+            });
+            res.vaerer[nr] = {
+                navn: label.replace(nr, "").trim(),
+                netto: nettoKol >= 0 ? num(r[nettoKol]) : sum,
+                perProdusent: per
+            };
+        } else if (lower.startsWith("netto paringer")) settMedlem("netto", r);
+        else if (lower.startsWith("sum andre")) settMedlem("andre", r);
+        else if (lower.startsWith("antall avlss")) settMedlem("soyer", r);
+        else if (lower.startsWith("mangler paring")) settMedlem("mangler", r);
+    }
+    return res;
+}
+
+// ---------- Visning ----------
+function visForside() {
+    const antall = avd => MEDLEMMER
+        .filter(m => m.avd === avd)
+        .reduce((s, m) => s + vaerData.filter(v => v["Hos"] === m.navn).length, 0);
 
     document.getElementById("app").innerHTML = `
-
+    ${advarsler.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     <h1>
-
-        <div class="hoved">
-        VÆRRINGEN
-        </div>
-
-        <div class="under">
-        RINGSAKER 2026
-        </div>
-
+        <div class="hoved">VÆRRINGEN</div>
+        <div class="under">RINGSAKER 2026</div>
     </h1>
-
-    <div class="knapp"
-         onclick="visAvdeling('Søndre')">
-
-        SØNDRE AVD.<br>
-        ${sondre} værer
-
-    </div>
-
-    <div class="knapp"
-         onclick="visAvdeling('Nordre')">
-
-        NORDRE AVD.<br>
-        ${nordre} værer
-
-    </div>
-
-    `;
-
+    ${AVDELINGER.map(a => `
+    <div class="knapp" onclick="visAvdeling('${a}')">
+        ${a.toUpperCase()} AVD.<br>${antall(a)} værer
+    </div>`).join("")}`;
 }
 
-function visAvdeling(avdeling){
+function visAvdeling(avd) {
+    let html = `<div class="tilbake" onclick="visForside()">← Tilbake</div>`;
 
-    let medlemmer=[];
-
-    if(avdeling==="Søndre"){
-
-        medlemmer=[
-            "Per-Joar",
-            "Bernt",
-            "Per Jonas"
-        ];
-
-    }
-
-    if(avdeling==="Nordre"){
-
-        medlemmer=[
-            "Johanne",
-            "Einar&Thea",
-            "Agnete"
-        ];
-
-    }
-
-    let html=`
-
-    <div class="tilbake"
-         onclick="visForside()">
-
-        ← Tilbake
-
-    </div>
-
-    `;
-
-    medlemmer.forEach(medlem=>{
-
-        let gjenstar =
-            medlemmerData.find(
-                m=>m.Medlem===medlem
-            );
-
+    MEDLEMMER.filter(m => m.avd === avd).forEach(m => {
+        const s = imp ? imp.medlem[m.id] : null;
         html += `
-
         <div class="medlem">
+            <h2>${esc(m.navn)}</h2>
+            <p class="stat"><b>Gjenstår:</b> ${s ? s.mangler : "-"} søyer
+               (av ${s ? s.soyer : "-"} avlssøyer)</p>
+            <p class="stat"><b>Netto paringer:</b> ${s ? s.netto : "-"}
+               ${s && s.andre ? `(hvorav ${s.andre} på andre værer)` : ""}</p>`;
 
-            <h2>${medlem}</h2>
-
-            <p>
-
-                Gjenstår:
-                ${gjenstar ? Object.values(gjenstar)[1] : "-"}
-
-                søyer
-
-            </p>
-
-        `;
-
-        vaerData
-        .filter(v=>v.Hos===medlem)
-        .forEach(v=>{
-
+        vaerData.filter(v => v["Hos"] === m.navn).forEach(v => {
+            const info = imp ? imp.vaerer[v["Kåringsnr"]] : null;
             html += `
-
-            <div class="vaer"
-                 onclick="visVaer('${v["Kåringsnr"]}')">
-
-                <span>
-                ${v["Vær"]}
-                </span>
-
-                <strong>
-                0
-                </strong>
-
-            </div>
-
-            `;
-
+            <div class="vaer" onclick="visVaer('${esc(v["Kåringsnr"])}', '${avd}')">
+                <span>${esc(v["Vær"])}</span>
+                <strong>${info ? info.netto : "-"}</strong>
+            </div>`;
         });
-
-        html += `
-        </div>
-        `;
-
+        html += `</div>`;
     });
 
     document.getElementById("app").innerHTML = html;
-
 }
 
-function visVaer(karingsnr){
+function visVaer(karingsnr, avd) {
+    const vaer = vaerData.find(v => v["Kåringsnr"] === karingsnr);
+    if (!vaer) { visForside(); return; }
+    const info = imp ? imp.vaerer[karingsnr] : null;
 
-    let vaer =
-        vaerData.find(
-            v=>v["Kåringsnr"]===karingsnr
-        );
-
-    let funnet =
-        importData.includes(karingsnr);
+    const rader = info
+        ? MEDLEMMER.filter(m => info.perProdusent[m.id] > 0)
+            .map(m => `<tr><td>${esc(m.navn)}</td><td>${info.perProdusent[m.id]}</td></tr>`).join("")
+        : "";
 
     document.getElementById("app").innerHTML = `
-
-    <div class="tilbake"
-         onclick="history.back()">
-
-        ← Tilbake
-
-    </div>
-
+    <div class="tilbake" onclick="visAvdeling('${avd}')">← Tilbake</div>
     <div class="info">
-
-        <h2>
-        ${vaer["Vær"]}
-        </h2>
-
-        <p>
-
-        <b>Kåringsnr:</b>
-        ${vaer["Kåringsnr"]}
-
-        </p>
-
-        <p>
-
-        <b>Hos:</b>
-        ${vaer["Hos"]}
-
-        </p>
-
+        <h2>${esc(vaer["Vær"])}</h2>
+        <p><b>Kåringsnr:</b> ${esc(vaer["Kåringsnr"])}</p>
+        <p><b>Hos:</b> ${esc(vaer["Hos"])}</p>
         <hr>
-
-        <h3>
-        Animalia-test
-        </h3>
-
-        <p>
-
-        Kåringsnummer i import.csv:
-
-        <b style="color:${funnet ? 'green' : 'red'}">
-
-        ${funnet ? 'FUNNET' : 'IKKE FUNNET'}
-
-        </b>
-
-        </p>
-
-    </div>
-
-    `;
-
+        <h3>Animalia</h3>
+        <p>Funnet i import.csv:
+            <b style="color:${info ? "green" : "red"}">${info ? "FUNNET" : "IKKE FUNNET"}</b></p>
+        ${info ? `
+        <p><b>Netto paringer:</b> ${info.netto}</p>
+        ${rader ? `<table>${rader}</table>` : "<p>Ingen paringer registrert.</p>"}` : ""}
+    </div>`;
 }
 
-</script>
+// ---------- Oppstart ----------
+function hent(fil) {
+    return fetch(fil).then(r => {
+        if (!r.ok) throw new Error(`${fil}: HTTP ${r.status}`);
+        return r.text();
+    });
+}
 
+Promise.allSettled([hent("appdata_test.csv"), hent("import.csv")]).then(([a, i]) => {
+    if (a.status === "fulfilled") vaerData = tilObjekter(parseCSV(a.value));
+    else advarsler.push("Kunne ikke lese appdata_test.csv.");
+
+    if (i.status === "fulfilled") {
+        imp = tolkImport(parseCSV(i.value));
+        if (!imp) advarsler.push("Fant ikke produsentene i import.csv. Er filen riktig eksportert?");
+    } else advarsler.push("Kunne ikke lese import.csv.");
+
+    visForside();
+});
+</script>
 </body>
 </html>
