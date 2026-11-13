@@ -25,6 +25,8 @@ h1{text-align:center}
 .sl small{color:#777}
 .spor{position:relative;height:20px;background:#e6e6e6;border-radius:4px}
 .fyll{height:100%;border-radius:4px}
+html,body{overscroll-behavior-y:contain}
+#pull{position:fixed;top:0;left:0;right:0;text-align:center;padding:8px;font-size:14px;color:#555;opacity:0;pointer-events:none;transform:translateY(-34px);transition:opacity .2s;z-index:10}
 .bunn{text-align:center;color:#777;font-size:13px;margin-top:30px;line-height:1.6}
 .mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
 table{border-collapse:collapse;width:100%}
@@ -33,6 +35,7 @@ td:last-child{text-align:right;font-weight:bold}
 </style>
 </head>
 <body>
+<div id="pull"></div>
 <div id="app">Laster...</div>
 
 <div class="bunn">
@@ -55,6 +58,7 @@ const AVDELINGER = ["Søndre", "Nordre"];
 let vaerData = [];
 let imp = null;      // tolket import.csv, eller null
 let advarsler = [];
+let visning = null;   // funksjonen som tegner siden brukeren står på, så en oppdatering beholder visningen
 
 function esc(s) {
     return String(s ?? "").replace(/[&<>"']/g, c => (
@@ -161,6 +165,7 @@ function tolkImport(rows) {
 
 // ---------- Visning ----------
 function visForside() {
+    visning = visForside;
     const antall = avd => MEDLEMMER
         .filter(m => m.avd === avd)
         .reduce((s, m) => s + vaerData.filter(v => v["Hos"] === m.navn).length, 0);
@@ -180,6 +185,7 @@ function visForside() {
 }
 
 function visAvdeling(avd) {
+    visning = () => visAvdeling(avd);
     let html = `<div class="tilbake" onclick="visForside()">← Tilbake</div>`;
 
     MEDLEMMER.filter(m => m.avd === avd).forEach(m => {
@@ -207,6 +213,7 @@ function visAvdeling(avd) {
 }
 
 function visVaer(karingsnr, avd) {
+    visning = () => visVaer(karingsnr, avd);
     const vaer = vaerData.find(v => v["Kåringsnr"] === karingsnr);
     if (!vaer) { visForside(); return; }
     const info = imp ? imp.vaerer[karingsnr] : null;
@@ -232,6 +239,7 @@ function visVaer(karingsnr, avd) {
 
 // Totaloversikt: de 16 prøveværene, sortert med færrest paringer øverst.
 function visTotal() {
+    visning = visTotal;
     const MAL = 25;
 
     const rader = Object.entries(imp.vaerer).map(([nr, v]) => {
@@ -281,7 +289,13 @@ function hent(fil) {
     });
 }
 
-Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
+let sisteLast = 0, pagaar = null;
+
+// Henter data på nytt og tegner den siden brukeren står på
+function last() {
+    if (pagaar) return pagaar;
+    pagaar = Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
+    advarsler = [];
     if (a.status === "fulfilled") vaerData = tilObjekter(parseCSV(a.value.text));
     else advarsler.push("Kunne ikke lese appdata.csv.");
 
@@ -300,8 +314,56 @@ Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
         if (!imp) advarsler.push("Fant ikke produsentene i import.csv. Er filen riktig eksportert?");
     } else advarsler.push("Kunne ikke lese import.csv.");
 
-    visForside();
+    const y = window.scrollY;
+    (visning || visForside)();
+    window.scrollTo(0, y);
+    }).finally(() => { pagaar = null; sisteLast = Date.now(); });
+    return pagaar;
+}
+
+last();
+
+// Automatisk oppdatering når appen åpnes igjen etter mer enn ett minutt borte
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && Date.now() - sisteLast > 60000) last();
 });
+
+// Dra ned for å oppdatere (fungerer likt på iPhone og Android)
+(function () {
+    const GRENSE = 70;
+    const ind = document.getElementById("pull");
+    let y0 = null, dy = 0, oppdaterer = false;
+
+    const paToppen = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+    const skjul = () => { ind.style.opacity = 0; ind.style.transform = "translateY(-34px)"; };
+
+    document.addEventListener("touchstart", e => {
+        y0 = !oppdaterer && paToppen() ? e.touches[0].clientY : null;
+        dy = 0;
+    }, { passive: true });
+
+    document.addEventListener("touchmove", e => {
+        if (y0 === null) return;
+        dy = e.touches[0].clientY - y0;
+        if (dy > 10) {
+            ind.textContent = dy > GRENSE ? "Slipp for å oppdatere" : "Dra for å oppdatere";
+            ind.style.opacity = Math.min(dy / GRENSE, 1);
+            ind.style.transform = `translateY(${Math.min(dy / 2, 50) - 34}px)`;
+        } else skjul();
+    }, { passive: true });
+
+    document.addEventListener("touchend", () => {
+        const utlost = y0 !== null && dy > GRENSE;
+        y0 = null; dy = 0;
+        if (!utlost) { skjul(); return; }
+
+        oppdaterer = true;
+        ind.textContent = "Oppdaterer...";
+        ind.style.opacity = 1;
+        ind.style.transform = "translateY(0)";
+        last().finally(() => { oppdaterer = false; skjul(); });
+    });
+})();
 </script>
 </body>
 </html>
