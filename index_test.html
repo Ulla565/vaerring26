@@ -17,6 +17,15 @@ h1{text-align:center}
 .tilbake{cursor:pointer;color:blue;margin-bottom:20px;font-weight:bold}
 .info{background:white;padding:20px;border-radius:10px}
 .feil{background:#fff3cd;padding:12px;border-radius:8px;margin-bottom:15px}
+.tall{display:flex;gap:10px;margin-bottom:15px}
+.tall div{flex:1;background:white;border-radius:10px;padding:12px;text-align:center;font-size:14px;color:#555}
+.tall b{display:block;font-size:28px;color:#000}
+.sr{background:white;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.sl{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+.sl small{color:#777}
+.spor{position:relative;height:20px;background:#e6e6e6;border-radius:4px}
+.fyll{height:100%;border-radius:4px}
+.mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
 table{border-collapse:collapse;width:100%}
 td{padding:6px 4px;border-bottom:1px solid #eee}
 td:last-child{text-align:right;font-weight:bold}
@@ -159,7 +168,9 @@ function visForside() {
     ${AVDELINGER.map(a => `
     <div class="knapp" onclick="visAvdeling('${a}')">
         ${a.toUpperCase()} AVD.<br>${antall(a)} værer
-    </div>`).join("")}`;
+    </div>`).join("")}
+    ${imp ? `
+    <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>` : ""}`;
 }
 
 function visAvdeling(avd) {
@@ -200,7 +211,7 @@ function visVaer(karingsnr, avd) {
         : "";
 
     document.getElementById("app").innerHTML = `
-    <div class="tilbake" onclick="visAvdeling('${avd}')">← Tilbake</div>
+    <div class="tilbake" onclick="${avd === "total" ? "visTotal()" : `visAvdeling('${avd}')`}">← Tilbake</div>
     <div class="info">
         <h2>${esc(vaer["Vær"])}</h2>
         <p><b>Kåringsnr:</b> ${esc(vaer["Kåringsnr"])}</p>
@@ -211,6 +222,48 @@ function visVaer(karingsnr, avd) {
         ${rader ? `<table>${rader}</table>` : "<p>Ingen paringer registrert.</p>"}`
         : `<p style="color:red">Fant ikke denne væren i import.csv.</p>`}
     </div>`;
+}
+
+// Totaloversikt: de 16 prøveværene, sortert med færrest paringer øverst.
+function visTotal() {
+    const MAL = 25;
+
+    const rader = Object.entries(imp.vaerer).map(([nr, v]) => {
+        const a = vaerData.find(x => x["Kåringsnr"] === nr);
+        return {
+            nr,
+            navn: a ? a["Vær"] : v.navn,
+            hos: a ? a["Hos"] : "",
+            netto: v.netto,
+            kjent: !!a
+        };
+    }).sort((x, y) => x.netto - y.netto || x.navn.localeCompare(y.navn, "no"));
+
+    const total = rader.reduce((s, r) => s + r.netto, 0);
+    const igjen = rader.reduce((s, r) => s + Math.max(0, MAL - r.netto), 0);
+    const nadd = rader.filter(r => r.netto >= MAL).length;
+    const maks = Math.max(MAL, ...rader.map(r => r.netto));
+    const malPos = MAL / maks * 100;
+
+    document.getElementById("app").innerHTML = `
+    <div class="tilbake" onclick="visForside()">← Tilbake</div>
+    <h2>Totaloversikt prøvevær</h2>
+    <div class="tall">
+        <div><b>${total}</b>paringer totalt</div>
+        <div><b>${nadd} / ${rader.length}</b>har nådd ${MAL}</div>
+        <div><b>${igjen}</b>gjenstår til mål</div>
+    </div>
+    ${rader.map(r => `
+    <div class="sr" ${r.kjent ? `onclick="visVaer('${esc(r.nr)}', 'total')"` : ""}>
+        <div class="sl">
+            <span>${esc(r.navn)} ${r.hos ? `<small>${esc(r.hos)}</small>` : ""}</span>
+            <b>${r.netto} / ${MAL}</b>
+        </div>
+        <div class="spor">
+            <div class="fyll" style="width:${r.netto / maks * 100}%;background:${r.netto >= MAL ? "#2e9e4f" : "#3b82f6"}"></div>
+            <div class="mal" style="left:${malPos}%"></div>
+        </div>
+    </div>`).join("")}`;
 }
 
 // ---------- Oppstart ----------
