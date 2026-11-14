@@ -48,6 +48,7 @@ html,body{overscroll-behavior-y:contain}
 .pil{color:#2e9e4f;font-weight:bold}
 h3.avsnitt{margin:26px 0 8px}
 .notat{color:#666;font-size:14px;margin:6px 0 12px}
+.stjerne{color:#e0a800}
 .bunn{text-align:center;color:#777;font-size:13px;margin-top:30px;line-height:1.6}
 .mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
 table{border-collapse:collapse;width:100%}
@@ -84,6 +85,11 @@ const MEDLEMMER = [
     { navn: "Agnete",     id: "3411061082", avd: "Nordre" }
 ];
 const AVDELINGER = ["Søndre", "Nordre"];
+
+// De tre beste værene. De bør fordeles så jevnt som mulig mellom Søndre og Nordre.
+const STJERNER = ["202613378", "202613405", "202613410"];   // NESTHUN GRIMMEN, GRØNVOLD STYGGEN, GRØNVOLD BOSS
+const erStjerne = nr => STJERNER.includes(nr);
+const stjerne = nr => erStjerne(nr) ? '<span class="stjerne">★</span> ' : "";
 
 let vaerData = [];
 let imp = null;      // tolket import.csv, eller null
@@ -247,7 +253,7 @@ function visAvdeling(avd) {
             const info = imp ? imp.vaerer[v["Kåringsnr"]] : null;
             html += `
             <div class="vaer" onclick="visVaer('${esc(v["Kåringsnr"])}', '${avd}')">
-                <span>${esc(v["Vær"])}
+                <span>${stjerne(v["Kåringsnr"])}${esc(v["Vær"])}
                     ${info && erFerdig(m, v["Kåringsnr"]) ? '<span class="ferdig">Ferdig</span>' : ""}</span>
                 <strong>${info ? info.netto : "-"}</strong>
             </div>`;
@@ -276,7 +282,7 @@ function visVaer(karingsnr, avd) {
     document.getElementById("app").innerHTML = `
     <div class="tilbake" onclick="${avd === "total" ? "visTotal()" : avd === "logistikk" ? "visLogistikk()" : `visAvdeling('${avd}')`}">← Tilbake</div>
     <div class="info">
-        <h2>${esc(vaer["Vær"])}</h2>
+        <h2>${stjerne(vaer["Kåringsnr"])}${esc(vaer["Vær"])}</h2>
         <p><b>Kåringsnr:</b> ${esc(vaer["Kåringsnr"])}</p>
         <p><b>Hos:</b> ${esc(vaer["Hos"])}</p>
         <hr>
@@ -321,7 +327,7 @@ function visTotal() {
     ${rader.map(r => `
     <div class="sr" ${r.kjent ? `onclick="visVaer('${esc(r.nr)}', 'total')"` : ""}>
         <div class="sl">
-            <span>${esc(r.navn)} ${r.hos ? `<small>${esc(r.hos)}</small>` : ""}</span>
+            <span>${stjerne(r.nr)}${esc(r.navn)} ${r.hos ? `<small>${esc(r.hos)}</small>` : ""}</span>
             <b>${r.netto} / ${MAL}</b>
         </div>
         <div class="spor">
@@ -373,33 +379,109 @@ async function installer() {
 
 // ---------- Logistikk ----------
 // Antakelse: «Hos» i appdata.csv er hvor væren står nå. Flytter du en vær, endrer du «Hos».
-// En vær som er ferdig hos den som har den, foreslås flyttet til et medlem som har mest igjen
-// av kvoten på den væren. Først forsøkes medlemmer i samme avdeling, så den andre avdelingen.
+//
+// 1) Innad i hver avdeling: En vær som er ferdig hos den som har den, foreslås flyttet til et medlem
+//    i samme avdeling som har mer igjen av kvoten. Av dem velges den som har flest søyer igjen å pare
+//    per vær som allerede står der, slik at de som trenger flest værer får flest.
+// 2) Ukentlig bytte: Ca. 4 værer fra Nordre byttes mot like mange fra Søndre. De som er mest ferdige
+//    i egen avdeling og har mest igjen i den andre prioriteres, og stjerneværene holdes jevnt fordelt.
+const ANTALL_BYTTE = 4;
+
+const behov = m => imp.medlem[m.id].mangler;   // søyer som ennå ikke er paret
+const aktiveHos = m => vaerData.filter(v => imp.vaerer[v["Kåringsnr"]] &&
+    v["Hos"] === m.navn && !erFerdig(m, v["Kåringsnr"])).length;
+const restI = (avd, nr) => MEDLEMMER.filter(m => m.avd === avd)
+    .reduce((sum, m) => sum + igjenHos(m, nr), 0);
+const andreAvd = avd => avd === "Søndre" ? "Nordre" : "Søndre";
+
+function kombinasjoner(liste, k) {
+    const ut = [];
+    (function gaa(start, valgt) {
+        if (valgt.length === k) { ut.push(valgt.slice()); return; }
+        for (let i = start; i < liste.length; i++) { valgt.push(liste[i]); gaa(i + 1, valgt); valgt.pop(); }
+    })(0, []);
+    return ut;
+}
+
 function lagForslag() {
     const vaerer = vaerData
         .filter(v => imp.vaerer[v["Kåringsnr"]] && holder(v))
         .map(v => ({ nr: v["Kåringsnr"], navn: v["Vær"], fra: holder(v) }));
 
-    const inn = {};
-    MEDLEMMER.forEach(m => { inn[m.id] = 0; });
-    const res = { intern: { "Søndre": [], "Nordre": [] }, mellom: [], ferdigOveralt: [], blirStaende: 0 };
+    const inn = {}, aktive = {};
+    MEDLEMMER.forEach(m => { inn[m.id] = 0; aktive[m.id] = aktiveHos(m); });
+    const poeng = m => behov(m) / (aktive[m.id] + inn[m.id] + 1);
+    const mottaker = (liste, v) => liste
+        .filter(m => m.id !== v.fra.id && igjenHos(m, v.nr) > 0)
+        .sort((a, b) => poeng(b) - poeng(a) || igjenHos(b, v.nr) - igjenHos(a, v.nr))[0];
+
+    const res = {
+        intern: { "Søndre": [], "Nordre": [] },
+        bytte: { k: 0, nordTilSor: [], sorTilNord: [], stjerner: null },
+        ferdigOveralt: [], utenForslag: 0
+    };
+
+    // 1) Innad i avdelingene
+    const flyttet = new Set();
+    for (const v of vaerer) {
+        if (!erFerdig(v.fra, v.nr)) continue;
+        const til = mottaker(MEDLEMMER.filter(m => m.avd === v.fra.avd), v);
+        if (!til) continue;
+        inn[til.id]++;
+        flyttet.add(v.nr);
+        res.intern[v.fra.avd].push({ ...v, til });
+    }
+
+    // 2) Ukentlig bytte mellom Nordre og Søndre
+    const kandidater = avd => vaerer
+        .filter(v => v.fra.avd === avd && !flyttet.has(v.nr))
+        .map(v => ({ ...v, poeng: restI(andreAvd(avd), v.nr) - restI(avd, v.nr), annet: restI(andreAvd(avd), v.nr) }))
+        .filter(v => v.poeng > 0 && v.annet > 0)
+        .sort((a, b) => b.poeng - a.poeng)
+        .slice(0, 8);
+
+    const nord = kandidater("Nordre"), sor = kandidater("Søndre");
+    const k = Math.min(ANTALL_BYTTE, nord.length, sor.length);
+    const stjerneNord = vaerer.filter(v => v.fra.avd === "Nordre" && erStjerne(v.nr)).length;
+    const stjerneSor = vaerer.filter(v => v.fra.avd === "Søndre" && erStjerne(v.nr)).length;
+
+    if (k > 0) {
+        let beste = null;
+        for (const n of kombinasjoner(nord, k)) {
+            for (const so of kombinasjoner(sor, k)) {
+                const sn = n.filter(v => erStjerne(v.nr)).length;
+                const ss = so.filter(v => erStjerne(v.nr)).length;
+                const nNord = stjerneNord - sn + ss, nSor = stjerneSor - ss + sn;
+                const straff = Math.max(0, Math.abs(nNord - nSor) - 1);
+                const sum = n.reduce((t, v) => t + v.poeng, 0) + so.reduce((t, v) => t + v.poeng, 0);
+                const flyttStjerner = sn + ss;
+                if (!beste || straff < beste.straff ||
+                    (straff === beste.straff && (sum > beste.sum ||
+                        (sum === beste.sum && flyttStjerner < beste.flyttStjerner)))) {
+                    beste = { n, so, straff, sum, flyttStjerner, nNord, nSor };
+                }
+            }
+        }
+        const tildel = (liste, tilAvd) => liste.map(v => {
+            const til = mottaker(MEDLEMMER.filter(m => m.avd === tilAvd), { ...v, fra: v.fra });
+            inn[til.id]++;
+            return { ...v, til };
+        });
+        res.bytte = {
+            k,
+            nordTilSor: tildel(beste.n, "Søndre"),
+            sorTilNord: tildel(beste.so, "Nordre"),
+            stjerner: { foer: [stjerneNord, stjerneSor], etter: [beste.nNord, beste.nSor] }
+        };
+        beste.n.concat(beste.so).forEach(v => flyttet.add(v.nr));
+    } else {
+        res.bytte.stjerner = { foer: [stjerneNord, stjerneSor], etter: [stjerneNord, stjerneSor] };
+    }
 
     for (const v of vaerer) {
-        if (!erFerdig(v.fra, v.nr)) { res.blirStaende++; continue; }
-
-        const beste = liste => liste
-            .filter(m => m.id !== v.fra.id && igjenHos(m, v.nr) > 0)
-            .sort((a, b) => igjenHos(b, v.nr) - igjenHos(a, v.nr) || inn[a.id] - inn[b.id])[0];
-
-        const egen = MEDLEMMER.filter(m => m.avd === v.fra.avd);
-        const andre = MEDLEMMER.filter(m => m.avd !== v.fra.avd);
-
-        let til = beste(egen), mal = res.intern[v.fra.avd];
-        if (!til) { til = beste(andre); mal = res.mellom; }
-        if (!til) { res.ferdigOveralt.push(v); continue; }
-
-        inn[til.id]++;
-        mal.push({ ...v, til });
+        if (flyttet.has(v.nr)) continue;
+        if (erFerdig(v.fra, v.nr) && restI("Nordre", v.nr) + restI("Søndre", v.nr) === 0) res.ferdigOveralt.push(v);
+        else res.utenForslag++;
     }
     return res;
 }
@@ -410,28 +492,40 @@ function visLogistikk() {
 
     const kort = fs => fs.map(x => `
         <div class="forslag">
-            <div><b style="cursor:pointer" onclick="visVaer('${esc(x.nr)}', 'logistikk')">${esc(x.navn)}</b></div>
+            <div>${stjerne(x.nr)}<b style="cursor:pointer" onclick="visVaer('${esc(x.nr)}', 'logistikk')">${esc(x.navn)}</b></div>
             <div class="rute">${esc(x.fra.navn)} <span class="pil">→</span> ${esc(x.til.navn)}
                 ${x.fra.avd !== x.til.avd ? `<small style="display:inline">(${x.fra.avd} → ${x.til.avd})</small>` : ""}</div>
-            <small>Ferdig hos ${esc(x.fra.navn)} (${utfort(x.fra, x.nr)} / ${kvote(x.fra)}).
-                ${esc(x.til.navn)} har ${igjenHos(x.til, x.nr)} igjen (${utfort(x.til, x.nr)} / ${kvote(x.til)}).</small>
+            <small>${erFerdig(x.fra, x.nr) ? "Ferdig hos" : "Står hos"} ${esc(x.fra.navn)} (${utfort(x.fra, x.nr)} / ${kvote(x.fra)}) –
+                ${esc(x.til.navn)} har ${igjenHos(x.til, x.nr)} igjen på denne (${utfort(x.til, x.nr)} / ${kvote(x.til)})
+                og ${behov(x.til)} søyer igjen å pare.</small>
         </div>`).join("");
 
-    const seksjon = (tittel, fs) => `
+    const seksjon = (tittel, fs, tom) => `
         <h3 class="avsnitt">${tittel}</h3>
-        ${fs.length ? kort(fs) : '<p class="notat">Ingen forslag akkurat nå.</p>'}`;
+        ${fs.length ? kort(fs) : `<p class="notat">${tom || "Ingen forslag akkurat nå."}</p>`}`;
 
+    const b = f.bytte;
+    const st = b.stjerner;
     document.getElementById("app").innerHTML = `
     <div class="tilbake" onclick="visForside()">← Tilbake</div>
     <h2>Logistikk</h2>
-    <p class="notat">Forslag til flytting av værer som er ferdig hos den som har dem.
+    <p class="notat">Flytting innad i avdelingene foreslås først. De som har flest søyer igjen å pare får flest værer.
         Forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
-    ${seksjon("Mellom Søndre og Nordre", f.mellom)}
     ${seksjon("Innad i Søndre", f.intern["Søndre"])}
     ${seksjon("Innad i Nordre", f.intern["Nordre"])}
+
+    <h3 class="avsnitt">Ukentlig bytte mellom Nordre og Søndre${b.k ? ` (${b.k} mot ${b.k})` : ""}</h3>
+    ${b.k ? `
+    <p class="notat">${b.k < ANTALL_BYTTE ? `Bare ${b.k} værer passer for bytte akkurat nå. ` : ""}
+        <span class="stjerne">★</span> Stjerneværer, Nordre / Søndre: nå ${st.foer[0]} / ${st.foer[1]},
+        etter byttet ${st.etter[0]} / ${st.etter[1]}.</p>
+    <h4>Fra Nordre til Søndre</h4>${kort(b.nordTilSor)}
+    <h4>Fra Søndre til Nordre</h4>${kort(b.sorTilNord)}`
+    : `<p class="notat">Ingen værer passer for bytte akkurat nå.</p>`}
+
     <p class="notat" style="margin-top:20px">
-        ${f.blirStaende} værer er ikke ferdige der de står.
-        ${f.ferdigOveralt.length ? `Ferdige hos alle: ${f.ferdigOveralt.map(v => esc(v.navn)).join(", ")}.` : ""}
+        ${f.utenForslag} værer blir stående der de er.
+        ${f.ferdigOveralt.length ? `Ferdige hos alle: ${f.ferdigOveralt.map(v => stjerne(v.nr) + esc(v.navn)).join(", ")}.` : ""}
     </p>`;
 }
 
