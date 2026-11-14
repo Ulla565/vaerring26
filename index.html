@@ -35,6 +35,12 @@ h1{text-align:center}
 html,body{overscroll-behavior-y:contain}
 #pull{position:fixed;top:0;left:0;right:0;text-align:center;padding:8px;font-size:14px;color:#555;opacity:0;pointer-events:none;transform:translateY(-34px);transition:opacity .2s;z-index:10}
 .installer{display:block;padding:14px;background:#5fa832;color:white;margin:20px 0;border-radius:10px;text-align:center;font-size:18px;font-weight:bold;cursor:pointer}
+#port{position:fixed;inset:0;background:#f3f3f3;z-index:100;display:none;align-items:center;justify-content:center;padding:20px}
+.portboks{text-align:center;max-width:320px;width:100%}
+.portboks .hoved{font-size:34px;font-weight:bold}
+.portboks .under{font-size:20px;margin-bottom:24px}
+#kode{width:160px;font-size:32px;letter-spacing:12px;text-align:center;padding:10px;border:2px solid #bbb;border-radius:10px}
+#kodefeil{color:#c62828;height:24px;margin-top:12px;font-size:15px}
 .bunn{text-align:center;color:#777;font-size:13px;margin-top:30px;line-height:1.6}
 .mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
 table{border-collapse:collapse;width:100%}
@@ -43,6 +49,15 @@ td:last-child{text-align:right;font-weight:bold}
 </style>
 </head>
 <body>
+<div id="port">
+    <div class="portboks">
+        <div class="hoved">VÆRRINGEN</div>
+        <div class="under">RINGSAKER 2026</div>
+        <input id="kode" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4"
+               autocomplete="off" placeholder="····" aria-label="Kode">
+        <div id="kodefeil"></div>
+    </div>
+</div>
 <div id="pull"></div>
 <div id="app">Laster...</div>
 
@@ -369,6 +384,36 @@ function last() {
     }).finally(() => { pagaar = null; sisteLast = Date.now(); });
     return pagaar;
 }
+
+// ---------- Kodesperre ----------
+// Enkel sperre mot nysgjerrige. Koden ligger i filen, så dette er ikke ekte sikkerhet.
+const KODE = "1982";
+const LAGRINGSNOKKEL = "vaerring_kode_ok";
+
+function lagret() { try { return localStorage.getItem(LAGRINGSNOKKEL) === KODE; } catch (e) { return false; } }
+function husk() { try { localStorage.setItem(LAGRINGSNOKKEL, KODE); } catch (e) {} }
+
+(function () {
+    const port = document.getElementById("port");
+    const felt = document.getElementById("kode");
+    const feil = document.getElementById("kodefeil");
+    if (lagret()) return;
+
+    port.style.display = "flex";
+    felt.focus();
+    felt.addEventListener("input", () => {
+        felt.value = felt.value.replace(/\D/g, "");
+        feil.textContent = "";
+        if (felt.value.length < 4) return;
+        if (felt.value === KODE) {
+            husk();
+            port.style.display = "none";
+        } else {
+            feil.textContent = "Feil kode";
+            felt.value = "";
+        }
+    });
+})();
 
 last();
 
