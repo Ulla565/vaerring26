@@ -49,6 +49,8 @@ html,body{overscroll-behavior-y:contain}
 h3.avsnitt{margin:26px 0 8px}
 .notat{color:#666;font-size:14px;margin:6px 0 12px}
 .stjerne{color:#e0a800}
+.liten{display:inline-block;padding:8px 14px;background:white;border:1px solid #ccc;border-radius:8px;cursor:pointer;font-weight:bold;margin:6px 0}
+select{font-size:16px;padding:4px}
 .bunn{text-align:center;color:#777;font-size:13px;margin-top:30px;line-height:1.6}
 .mal{position:absolute;top:-3px;bottom:-3px;width:2px;background:#000}
 table{border-collapse:collapse;width:100%}
@@ -199,13 +201,49 @@ function tolkImport(rows) {
     return res;
 }
 
+// ---------- Klargjøring og kontroll av appdata.csv ----------
+const nn = s => String(s ?? "").toLowerCase().replace(/[\s\-]+/g, "");
+
+// Retter små skrivemåter i «Hos» (Per Joar → Per-Joar) og returnerer advarsler.
+function klargjorVaerData(rader) {
+    const adv = [];
+    const mangler = ["Kåringsnr", "Vær", "Hos"].filter(k => rader.length && !(k in rader[0]));
+    if (mangler.length) adv.push(`appdata.csv mangler kolonnen: ${mangler.map(k => "«" + k + "»").join(", ")}.`);
+
+    const ukjent = [], sett = new Set(), dubletter = [];
+    for (const v of rader) {
+        const m = MEDLEMMER.find(m => nn(m.navn) === nn(v["Hos"]));
+        if (m) v["Hos"] = m.navn;
+        else ukjent.push(`${v["Vær"] || v["Kåringsnr"]} («${v["Hos"] || "tom"}»)`);
+
+        if (sett.has(v["Kåringsnr"])) dubletter.push(v["Kåringsnr"]);
+        sett.add(v["Kåringsnr"]);
+    }
+    if (ukjent.length) adv.push(`Ukjent «Hos» i appdata.csv: ${ukjent.join(", ")}. Gyldige navn: ${MEDLEMMER.map(m => m.navn).join(", ")}.`);
+    if (dubletter.length) adv.push(`Kåringsnummer som står flere ganger i appdata.csv: ${dubletter.join(", ")}.`);
+    return adv;
+}
+
+// Værene i appdata.csv og import.csv skal være de samme.
+function sjekkMotImport() {
+    const adv = [];
+    const iApp = new Set(vaerData.map(v => v["Kåringsnr"]));
+    const utenImport = vaerData.filter(v => !imp.vaerer[v["Kåringsnr"]]).map(v => `${v["Vær"]} (${v["Kåringsnr"]})`);
+    const utenApp = Object.entries(imp.vaerer).filter(([nr]) => !iApp.has(nr)).map(([nr, v]) => `${v.navn} (${nr})`);
+    if (utenImport.length) adv.push(`Finnes i appdata.csv, men ikke i import.csv: ${utenImport.join(", ")}.`);
+    if (utenApp.length) adv.push(`Finnes i import.csv, men ikke i appdata.csv: ${utenApp.join(", ")}.`);
+    return adv;
+}
+
 // ---------- Kvote og «ferdig» ----------
 // Hver vær skal brukes like mye i hver besetning i forhold til antall avlssøyer:
-// kvote = avlssøyer / antall prøvevær, avrundet (48 søyer / 16 værer = 3 parringer).
+// kvote = (avlssøyer minus søyer paret med andre værer) / antall prøvevær, avrundet
+// (48 søyer / 16 værer = 3 parringer). Kvoten er et veiledende tak, ikke en hard grense.
 // En vær er «ferdig» hos et medlem når antall parringer har nådd kvoten.
 function kvote(m) {
     const n = Object.keys(imp.vaerer).length || 1;
-    return Math.round(imp.medlem[m.id].soyer / n);
+    const x = imp.medlem[m.id];
+    return Math.round(Math.max(0, x.soyer - x.andre) / n);
 }
 const utfort = (m, nr) => imp.vaerer[nr] ? imp.vaerer[nr].perProdusent[m.id] : 0;
 const igjenHos = (m, nr) => Math.max(0, kvote(m) - utfort(m, nr));
@@ -288,13 +326,13 @@ function visVaer(karingsnr, avd) {
         <hr>
         ${info ? `
         <p><b>Netto paringer:</b> ${info.netto}</p>
-        <p class="notat">Parringer hos hvert medlem, av kvoten (avlssøyer ÷ antall værer).</p>
+        <p class="notat">Parringer hos hvert medlem, av kvoten (avlssøyer minus søyer paret med andre værer, ÷ antall værer).</p>
         <table>${rader}</table>`
         : `<p style="color:red">Fant ikke denne væren i import.csv.</p>`}
     </div>`;
 }
 
-// Totaloversikt: de 16 prøveværene, sortert med færrest paringer øverst.
+// Totaloversikt: de 16 prøveværene, sortert med flest paringer øverst.
 function visTotal() {
     visning = visTotal;
     const MAL = 25;
@@ -308,7 +346,7 @@ function visTotal() {
             netto: v.netto,
             kjent: !!a
         };
-    }).sort((x, y) => x.netto - y.netto || x.navn.localeCompare(y.navn, "no"));
+    }).sort((x, y) => y.netto - x.netto || x.navn.localeCompare(y.navn, "no"));
 
     const total = rader.reduce((s, r) => s + r.netto, 0);
     const igjen = rader.reduce((s, r) => s + Math.max(0, MAL - r.netto), 0);
@@ -383,9 +421,26 @@ async function installer() {
 // 1) Innad i hver avdeling: En vær som er ferdig hos den som har den, foreslås flyttet til et medlem
 //    i samme avdeling som har mer igjen av kvoten. Av dem velges den som har flest søyer igjen å pare
 //    per vær som allerede står der, slik at de som trenger flest værer får flest.
-// 2) Ukentlig bytte: Ca. 4 værer fra Nordre byttes mot like mange fra Søndre. De som er mest ferdige
-//    i egen avdeling og har mest igjen i den andre prioriteres, og stjerneværene holdes jevnt fordelt.
-const ANTALL_BYTTE = 4;
+// 2) Bytte mellom Nordre og Søndre: Foreslås bare når minst BYTTE_VAERER værer er ferdige hos minst
+//    BYTTE_MEDLEMMER medlemmer (eller når du ber om det). Opptil «byttAntall» værer fra hver avdeling byttes.
+//    De som er mest ferdige i egen avdeling og har mest igjen i den andre prioriteres,
+//    og stjerneværene holdes jevnt fordelt.
+const ANTALL_BYTTE = 4;        // standard antall værer hver vei i et bytte (kan velges 2–6 på siden)
+const BYTTE_MEDLEMMER = 4;     // «ferdig hos de fleste medlemmene»: minst 4 av 6
+const BYTTE_VAERER = 4;        // «flere av værene»: minst 4 værer
+
+let byttAntall = (() => {
+    try { const n = parseInt(localStorage.getItem("vaerring_bytte_antall"), 10); if (n >= 2 && n <= 6) return n; } catch (e) {}
+    return ANTALL_BYTTE;
+})();
+let visByttLikevel = false;
+
+function settByttAntall(n) {
+    byttAntall = +n;
+    try { localStorage.setItem("vaerring_bytte_antall", String(byttAntall)); } catch (e) {}
+    visLogistikk();
+}
+function settByttLikevel(v) { visByttLikevel = v; visLogistikk(); }
 
 const behov = m => imp.medlem[m.id].mangler;   // søyer som ennå ikke er paret
 const aktiveHos = m => vaerData.filter(v => imp.vaerer[v["Kåringsnr"]] &&
@@ -393,6 +448,12 @@ const aktiveHos = m => vaerData.filter(v => imp.vaerer[v["Kåringsnr"]] &&
 const restI = (avd, nr) => MEDLEMMER.filter(m => m.avd === avd)
     .reduce((sum, m) => sum + igjenHos(m, nr), 0);
 const andreAvd = avd => avd === "Søndre" ? "Nordre" : "Søndre";
+
+function byttStatus() {
+    const nrs = Object.keys(imp.vaerer);
+    const ferdige = nrs.filter(nr => MEDLEMMER.filter(m => erFerdig(m, nr)).length >= BYTTE_MEDLEMMER).length;
+    return { ferdige, totalt: nrs.length, trengs: ferdige >= BYTTE_VAERER };
+}
 
 function kombinasjoner(liste, k) {
     const ut = [];
@@ -403,7 +464,13 @@ function kombinasjoner(liste, k) {
     return ut;
 }
 
-function lagForslag() {
+// Er nøkkel a bedre enn b? Ledd for ledd, første forskjell avgjør.
+function bedre(a, b) {
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return false;
+}
+
+function lagForslag(medBytte) {
     const vaerer = vaerData
         .filter(v => imp.vaerer[v["Kåringsnr"]] && holder(v))
         .map(v => ({ nr: v["Kåringsnr"], navn: v["Vær"], fra: holder(v) }));
@@ -432,50 +499,50 @@ function lagForslag() {
         res.intern[v.fra.avd].push({ ...v, til });
     }
 
-    // 2) Ukentlig bytte mellom Nordre og Søndre
-    const kandidater = avd => vaerer
-        .filter(v => v.fra.avd === avd && !flyttet.has(v.nr))
-        .map(v => ({ ...v, poeng: restI(andreAvd(avd), v.nr) - restI(avd, v.nr), annet: restI(andreAvd(avd), v.nr) }))
-        .filter(v => v.poeng > 0 && v.annet > 0)
-        .sort((a, b) => b.poeng - a.poeng)
-        .slice(0, 8);
-
-    const nord = kandidater("Nordre"), sor = kandidater("Søndre");
-    const k = Math.min(ANTALL_BYTTE, nord.length, sor.length);
+    // 2) Bytte mellom Nordre og Søndre
     const stjerneNord = vaerer.filter(v => v.fra.avd === "Nordre" && erStjerne(v.nr)).length;
     const stjerneSor = vaerer.filter(v => v.fra.avd === "Søndre" && erStjerne(v.nr)).length;
+    res.bytte.stjerner = { foer: [stjerneNord, stjerneSor], etter: [stjerneNord, stjerneSor] };
 
-    if (k > 0) {
-        let beste = null;
-        for (const n of kombinasjoner(nord, k)) {
-            for (const so of kombinasjoner(sor, k)) {
-                const sn = n.filter(v => erStjerne(v.nr)).length;
-                const ss = so.filter(v => erStjerne(v.nr)).length;
-                const nNord = stjerneNord - sn + ss, nSor = stjerneSor - ss + sn;
-                const straff = Math.max(0, Math.abs(nNord - nSor) - 1);
-                const sum = n.reduce((t, v) => t + v.poeng, 0) + so.reduce((t, v) => t + v.poeng, 0);
-                const flyttStjerner = sn + ss;
-                if (!beste || straff < beste.straff ||
-                    (straff === beste.straff && (sum > beste.sum ||
-                        (sum === beste.sum && flyttStjerner < beste.flyttStjerner)))) {
-                    beste = { n, so, straff, sum, flyttStjerner, nNord, nSor };
+    if (medBytte) {
+        const kandidater = avd => vaerer
+            .filter(v => v.fra.avd === avd && !flyttet.has(v.nr))
+            .map(v => ({ ...v, poeng: restI(andreAvd(avd), v.nr) - restI(avd, v.nr), annet: restI(andreAvd(avd), v.nr) }))
+            .filter(v => v.annet > 0)   // må ha noe igjen å gjøre i den andre avdelingen
+            .sort((a, b) => b.poeng - a.poeng)
+            .slice(0, 8);
+
+        const nord = kandidater("Nordre"), sor = kandidater("Søndre");
+        const k = Math.min(byttAntall, nord.length, sor.length);
+
+        if (k > 0) {
+            let beste = null;
+            for (const n of kombinasjoner(nord, k)) {
+                for (const so of kombinasjoner(sor, k)) {
+                    const sn = n.filter(v => erStjerne(v.nr)).length;
+                    const ss = so.filter(v => erStjerne(v.nr)).length;
+                    const nNord = stjerneNord - sn + ss, nSor = stjerneSor - ss + sn;
+                    const straff = Math.max(0, Math.abs(nNord - nSor) - 1);
+                    const sum = n.concat(so).reduce((t, v) => t + v.poeng, 0);
+                    // Rekkefølge: stjerner jevnt fordelt, flest parringer igjen i den andre avdelingen,
+                    // færrest stjerner flyttet.
+                    const nokkel = [-straff, sum, -(sn + ss)];
+                    if (!beste || bedre(nokkel, beste.nokkel)) beste = { n, so, nokkel, nNord, nSor };
                 }
             }
+            const tildel = (liste, tilAvd) => liste.map(v => {
+                const til = mottaker(MEDLEMMER.filter(m => m.avd === tilAvd), v);
+                inn[til.id]++;
+                return { ...v, til };
+            });
+            res.bytte = {
+                k,
+                nordTilSor: tildel(beste.n, "Søndre"),
+                sorTilNord: tildel(beste.so, "Nordre"),
+                stjerner: { foer: [stjerneNord, stjerneSor], etter: [beste.nNord, beste.nSor] }
+            };
+            beste.n.concat(beste.so).forEach(v => flyttet.add(v.nr));
         }
-        const tildel = (liste, tilAvd) => liste.map(v => {
-            const til = mottaker(MEDLEMMER.filter(m => m.avd === tilAvd), { ...v, fra: v.fra });
-            inn[til.id]++;
-            return { ...v, til };
-        });
-        res.bytte = {
-            k,
-            nordTilSor: tildel(beste.n, "Søndre"),
-            sorTilNord: tildel(beste.so, "Nordre"),
-            stjerner: { foer: [stjerneNord, stjerneSor], etter: [beste.nNord, beste.nSor] }
-        };
-        beste.n.concat(beste.so).forEach(v => flyttet.add(v.nr));
-    } else {
-        res.bytte.stjerner = { foer: [stjerneNord, stjerneSor], etter: [stjerneNord, stjerneSor] };
     }
 
     for (const v of vaerer) {
@@ -488,7 +555,9 @@ function lagForslag() {
 
 function visLogistikk() {
     visning = visLogistikk;
-    const f = lagForslag();
+    const status = byttStatus();
+    const visBytte = status.trengs || visByttLikevel;
+    const f = lagForslag(visBytte);
 
     const kort = fs => fs.map(x => `
         <div class="forslag">
@@ -500,28 +569,40 @@ function visLogistikk() {
                 og ${behov(x.til)} søyer igjen å pare.</small>
         </div>`).join("");
 
-    const seksjon = (tittel, fs, tom) => `
+    const seksjon = (tittel, fs) => `
         <h3 class="avsnitt">${tittel}</h3>
-        ${fs.length ? kort(fs) : `<p class="notat">${tom || "Ingen forslag akkurat nå."}</p>`}`;
+        ${fs.length ? kort(fs) : '<p class="notat">Ingen forslag akkurat nå.</p>'}`;
 
-    const b = f.bytte;
-    const st = b.stjerner;
+    const b = f.bytte, st = b.stjerner;
+    const antallValg = [2, 3, 4, 5, 6].map(n => `<option value="${n}"${n === byttAntall ? " selected" : ""}>${n}</option>`).join("");
+
+    const byttedel = visBytte ? `
+        <p class="notat"><label>Antall værer hver vei:
+            <select onchange="settByttAntall(this.value)">${antallValg}</select></label></p>
+        ${b.k ? `
+        <p class="notat">${b.k < byttAntall ? `Bare ${b.k} værer passer for bytte akkurat nå. ` : ""}
+            <span class="stjerne">★</span> Stjerneværer, Nordre / Søndre: nå ${st.foer[0]} / ${st.foer[1]},
+            etter byttet ${st.etter[0]} / ${st.etter[1]}.</p>
+        <h4>Fra Nordre til Søndre</h4>${kort(b.nordTilSor)}
+        <h4>Fra Søndre til Nordre</h4>${kort(b.sorTilNord)}`
+        : '<p class="notat">Ingen værer passer for bytte akkurat nå.</p>'}
+        ${status.trengs ? "" : '<div class="liten" onclick="settByttLikevel(false)">Skjul forslag</div>'}`
+        : `<p class="notat">Ikke nødvendig ennå.</p>
+        <div class="liten" onclick="settByttLikevel(true)">Vis forslag likevel</div>`;
+
     document.getElementById("app").innerHTML = `
     <div class="tilbake" onclick="visForside()">← Tilbake</div>
+    ${advarsler.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     <h2>Logistikk</h2>
     <p class="notat">Flytting innad i avdelingene foreslås først. De som har flest søyer igjen å pare får flest værer.
         Forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
     ${seksjon("Innad i Søndre", f.intern["Søndre"])}
     ${seksjon("Innad i Nordre", f.intern["Nordre"])}
 
-    <h3 class="avsnitt">Ukentlig bytte mellom Nordre og Søndre${b.k ? ` (${b.k} mot ${b.k})` : ""}</h3>
-    ${b.k ? `
-    <p class="notat">${b.k < ANTALL_BYTTE ? `Bare ${b.k} værer passer for bytte akkurat nå. ` : ""}
-        <span class="stjerne">★</span> Stjerneværer, Nordre / Søndre: nå ${st.foer[0]} / ${st.foer[1]},
-        etter byttet ${st.etter[0]} / ${st.etter[1]}.</p>
-    <h4>Fra Nordre til Søndre</h4>${kort(b.nordTilSor)}
-    <h4>Fra Søndre til Nordre</h4>${kort(b.sorTilNord)}`
-    : `<p class="notat">Ingen værer passer for bytte akkurat nå.</p>`}
+    <h3 class="avsnitt">Bytte mellom Nordre og Søndre${visBytte && b.k ? ` (${b.k} mot ${b.k})` : ""}</h3>
+    <p class="notat">Bytte trengs når minst ${BYTTE_VAERER} værer er ferdige hos minst ${BYTTE_MEDLEMMER} av ${MEDLEMMER.length} medlemmer.
+        Nå: ${status.ferdige} av ${status.totalt} værer.</p>
+    ${byttedel}
 
     <p class="notat" style="margin-top:20px">
         ${f.utenForslag} værer blir stående der de er.
@@ -534,7 +615,11 @@ function hent(fil) {
     // no-store: sikrer at ny import.csv vises med en gang, ikke en hurtiglagret versjon
     return fetch(fil, { cache: "no-store" }).then(r => {
         if (!r.ok) throw new Error(`${fil}: HTTP ${r.status}`);
-        return r.text().then(text => ({ text, modified: r.headers.get("Last-Modified") }));
+        return r.text().then(text => ({
+            text,
+            modified: r.headers.get("Last-Modified"),
+            fraCache: r.headers.get("X-Fra-Cache") === "1"   // satt av sw.js når nettet er borte
+        }));
     });
 }
 
@@ -545,22 +630,31 @@ function last() {
     if (pagaar) return pagaar;
     pagaar = Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
     advarsler = [];
-    if (a.status === "fulfilled") vaerData = tilObjekter(parseCSV(a.value.text));
-    else advarsler.push("Kunne ikke lese appdata.csv.");
+    if (a.status === "fulfilled") {
+        vaerData = tilObjekter(parseCSV(a.value.text));
+        advarsler.push(...klargjorVaerData(vaerData));
+    } else advarsler.push("Kunne ikke lese appdata.csv.");
 
     if (i.status === "fulfilled") {
         imp = tolkImport(parseCSV(i.value.text));
 
         // «Sist oppdatert» hentes fra tidspunktet import.csv sist ble endret på serveren
+        let sistTekst = "";
         const d = new Date(i.value.modified);
         if (i.value.modified && !isNaN(d)) {
-            document.getElementById("sist").textContent = "Sist oppdatert: " +
+            sistTekst = "Sist oppdatert: " +
                 d.toLocaleString("nb-NO", {
                     day: "numeric", month: "long", year: "numeric",
                     hour: "2-digit", minute: "2-digit", timeZone: "Europe/Oslo"
                 });
         }
+        if (i.value.fraCache || (a.status === "fulfilled" && a.value.fraCache)) {
+            sistTekst += (sistTekst ? " – " : "") + "uten nett, viser sist lagrede tall";
+        }
+        document.getElementById("sist").textContent = sistTekst;
+
         if (!imp) advarsler.push("Fant ikke produsentene i import.csv. Er filen riktig eksportert?");
+        else if (a.status === "fulfilled") advarsler.push(...sjekkMotImport());
     } else advarsler.push("Kunne ikke lese import.csv.");
 
     const y = window.scrollY;
@@ -601,6 +695,11 @@ function husk() { try { localStorage.setItem(LAGRINGSNOKKEL, KODE); } catch (e) 
 })();
 
 last();
+
+// Gjør at appen kan åpnes uten nett (viser sist lagrede tall) og kan installeres direkte på Android.
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
 
 // Automatisk oppdatering når appen åpnes igjen etter mer enn ett minutt borte
 document.addEventListener("visibilitychange", () => {
