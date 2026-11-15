@@ -176,12 +176,20 @@ function tolkImport(rows) {
         });
     };
 
+    // Bare værene mellom «Prøvevær» og «Sum Prøvevær» regnes med. Seminelite og andre grupper ignoreres.
+    // (Finnes ikke «Prøvevær»-raden, tas alle værer med.)
+    let iProve = !rows.some(r => rens(r[0]).toLowerCase() === "prøvevær");
+
     for (const r of rows.slice(hdrIdx + 1)) {
         const label = rens(r[0]);
         const lower = label.toLowerCase();
         const nr = (label.match(/\d{9,}/) || [])[0];
 
+        if (lower === "prøvevær") { iProve = true; continue; }
+        if (lower.startsWith("sum prøvevær")) { iProve = false; continue; }
+
         if (nr) {
+            if (!iProve) continue;
             const per = {};
             let sum = 0;
             MEDLEMMER.forEach(m => {
