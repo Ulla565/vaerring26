@@ -16,9 +16,9 @@ Prøvevær,,,,,,,,,,,
 "NESTHUN BAS...
 202613369",,,,,,,8,8,0,0 %,8
 "NESTHUN TOR...
-202613374",,,,,,,2,2,0,0 %,2
+202613374",,,,,,,5,5,0,0 %,5
 "NESTHUN STY...
-202613375",,,,,,,4,4,0,0 %,4
+202613375",,,,,,,5,5,0,0 %,5
 "NESTHUN GRI...
 202613378",,,,,,,,0,0,,0
 "NESTHUN MÆL...
@@ -45,19 +45,19 @@ Prøvevær,,,,,,,,,,,
 202613415",,,1,,,,,1,0,0 %,1
 "NESTHUN KLE...
 202613459",,,,,,,,0,0,,0
-Sum Prøvevær,,,3,,,,14,17,0,0 %,17
+Sum Prøvevær,,,3,,,,18,21,0,0 %,21
 Seminelite,,,,,,,,,,,
 "PARELIUS
 202525057",,,,,,,1,1,0,0 %,1
 "OSCAR BOBB
 202565373",,,,,,,1,1,0,0 %,1
 Sum Seminelite,,,,,,,2,2,0,0 %,2
-Sum andre værer,,,,6,,,36,42,0,0 %,42
-Sum alle værer,,,3,6,,,52,61,0,0 %,61
-Netto paringer,0,0,3,6,0,0,52,61,,,
+Sum andre værer,,,,8,,,36,44,0,0 %,44
+Sum alle værer,,,3,8,,,56,67,0,0 %,67
+Netto paringer,0,0,3,7,0,0,56,66,,,
 ,,,,,,,,,,,
 "Ikke para (kode 10, 11, 12 og 13)",0,0,0,0,0,0,0,0,,,
 Antall avlssøyer,97,126,48,225,128,11,152,787,,,
-Mangler paring,97,126,45,219,128,11,100,726,,,
+Mangler paring,97,126,45,218,128,11,96,721,,,
 ,,,,,,,,,,,
 Sauekontrollen 3.8.5 @ Animalia | Personvern og bruk av informasjonskapsler (cookies),,,,,,,,,,,
