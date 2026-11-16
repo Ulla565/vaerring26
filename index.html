@@ -4,7 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Værringen Ringsaker 2026</title>
-<link rel="manifest" href="manifest.webmanifest">
+<script>
+// Samsung Internet lager app-pakker som Google Play Protect kan blokkere. Der utelater vi manifestet,
+// så «Legg til» gir en vanlig snarvei i stedet. Chrome og andre får manifestet som vanlig.
+if (!/SamsungBrowser/i.test(navigator.userAgent)) {
+    var mf = document.createElement("link");
+    mf.rel = "manifest"; mf.href = "manifest.webmanifest";
+    document.head.appendChild(mf);
+}
+</script>
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#5fa832">
@@ -400,15 +408,33 @@ window.addEventListener("appinstalled", () => {
     if (visning === visForside) visForside();
 });
 
+const erSamsungNett = () => /SamsungBrowser/i.test(navigator.userAgent);
+
 function installKnapp() {
-    const mobil = erIOS() || /android/i.test(navigator.userAgent);
+    const android = /android/i.test(navigator.userAgent);
+    const mobil = erIOS() || android;
     if (erApp() || !(installPrompt || mobil)) return "";   // skjules når den allerede er en app
+    if (erSamsungNett()) return `
+    <div class="installer" onclick="kopierAdresse()">Kopier adressen for å installere i Chrome</div>
+    <div id="installHjelp" class="feil" style="display:none"></div>`;
     const hjelp = erIOS()
         ? "Trykk på Del-ikonet (firkanten med pil opp) i Safari, velg «Legg til på Hjem-skjerm», og trykk «Legg til»."
         : "Åpne nettleserens meny (⋮) og velg «Installer app» eller «Legg til på startskjermen».";
     return `
     <div class="installer" onclick="installer()">Last ned som app</div>
-    <div id="installHjelp" class="feil" style="display:none">${hjelp}</div>`;
+    <div id="installHjelp" class="feil" style="display:none">${hjelp}</div>
+    ${android ? '<p class="notat">Stopper installeringen? Åpne siden i Chrome, eller bruk menyen (⋮) → «Legg til på startskjermen» → «Opprett snarvei» hvis den finnes.</p>' : ""}`;
+}
+
+async function kopierAdresse() {
+    let ok = false;
+    try { await navigator.clipboard.writeText(location.href.split("#")[0]); ok = true; } catch (e) {}
+    const h = document.getElementById("installHjelp");
+    if (!h) return;
+    h.textContent = (ok ? "Adressen er kopiert. " : "") +
+        "Åpne Chrome, " + (ok ? "lim den inn i adressefeltet" : "skriv inn adressen") +
+        ", trykk på menyen (⋮) og velg «Installer app». Installering fra Samsung Internet kan bli blokkert av Google Play Protect.";
+    h.style.display = "block";
 }
 
 async function installer() {
