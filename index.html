@@ -43,6 +43,8 @@ h1{text-align:center}
 html,body{overscroll-behavior-y:contain}
 #pull{position:fixed;top:0;left:0;right:0;text-align:center;padding:8px;font-size:14px;color:#555;opacity:0;pointer-events:none;transform:translateY(-34px);transition:opacity .2s;z-index:10}
 .installer{display:block;padding:14px;background:#5fa832;color:white;margin:20px 0;border-radius:10px;text-align:center;font-size:18px;font-weight:bold;cursor:pointer}
+.snarvei{display:block;padding:12px;margin:26px 0 20px;border:1px solid #ccc;border-radius:10px;text-align:center;font-size:16px;color:#444;text-decoration:none}
+.snarvei:active{background:#e8e8e8}
 #port{position:fixed;inset:0;background:#f3f3f3;z-index:100;display:none;align-items:center;justify-content:center;padding:20px}
 .portboks{text-align:center;max-width:320px;width:100%}
 .portboks .hoved{font-size:34px;font-weight:bold}
@@ -95,6 +97,9 @@ const MEDLEMMER = [
     { navn: "Agnete",     id: "3411061082", avd: "Nordre" }
 ];
 const AVDELINGER = ["Søndre", "Nordre"];
+
+// Snarvei til insemineringskalkulatoren (eget repo: Ulla565/seminkalkulator på GitHub Pages).
+const KALKULATOR_URL = "https://ulla565.github.io/seminkalkulator/";
 
 // De tre beste værene. De bør fordeles så jevnt som mulig mellom Søndre og Nordre.
 const STJERNER = ["202613378", "202613405", "202613410"];   // NESTHUN GRIMMEN, GRØNVOLD STYGGEN, GRØNVOLD BOSS
@@ -293,6 +298,7 @@ function visForside() {
     ${imp ? `
     <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>
     <div class="knapp" onclick="visLogistikk()">LOGISTIKK</div>` : ""}
+    <a class="snarvei" href="${KALKULATOR_URL}">Beregn tidspunkt for inseminering →</a>
     ${installKnapp()}`;
 }
 
