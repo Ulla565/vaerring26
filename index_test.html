@@ -4,7 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Værringen Ringsaker 2026</title>
-<link rel="manifest" href="manifest.webmanifest">
+<script>
+// Samsung Internet lager app-pakker som Google Play Protect kan blokkere. Der utelater vi manifestet,
+// så «Legg til» gir en vanlig snarvei i stedet. Chrome og andre får manifestet som vanlig.
+if (!/SamsungBrowser/i.test(navigator.userAgent)) {
+    var mf = document.createElement("link");
+    mf.rel = "manifest"; mf.href = "manifest.webmanifest";
+    document.head.appendChild(mf);
+}
+</script>
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#5fa832">
@@ -168,7 +176,8 @@ function tolkImport(rows) {
     const nettoKol = hdr.findIndex(c => rens(c).toLowerCase().startsWith("netto paringer"));
 
     const res = { vaerer: {}, medlem: {} };
-    MEDLEMMER.forEach(m => { res.medlem[m.id] = { netto: 0, andre: 0, soyer: 0, mangler: 0 }; });
+    MEDLEMMER.forEach(m => { res.medlem[m.id] = { netto: 0, andre: 0, alle: 0, prove: 0, soyer: 0, mangler: 0 }; });
+    res.harAlle = false;
 
     const settMedlem = (felt, r) => {
         MEDLEMMER.forEach(m => {
@@ -176,12 +185,20 @@ function tolkImport(rows) {
         });
     };
 
+    // Bare værene mellom «Prøvevær» og «Sum Prøvevær» regnes med. Seminelite og andre grupper ignoreres.
+    // (Finnes ikke «Prøvevær»-raden, tas alle værer med.)
+    let iProve = !rows.some(r => rens(r[0]).toLowerCase() === "prøvevær");
+
     for (const r of rows.slice(hdrIdx + 1)) {
         const label = rens(r[0]);
         const lower = label.toLowerCase();
         const nr = (label.match(/\d{9,}/) || [])[0];
 
+        if (lower === "prøvevær") { iProve = true; continue; }
+        if (lower.startsWith("sum prøvevær")) { iProve = false; settMedlem("prove", r); continue; }
+
         if (nr) {
+            if (!iProve) continue;
             const per = {};
             let sum = 0;
             MEDLEMMER.forEach(m => {
@@ -195,6 +212,7 @@ function tolkImport(rows) {
             };
         } else if (lower.startsWith("netto paringer")) settMedlem("netto", r);
         else if (lower.startsWith("sum andre")) settMedlem("andre", r);
+        else if (lower.startsWith("sum alle")) { settMedlem("alle", r); res.harAlle = true; }
         else if (lower.startsWith("antall avlss")) settMedlem("soyer", r);
         else if (lower.startsWith("mangler paring")) settMedlem("mangler", r);
     }
@@ -237,13 +255,18 @@ function sjekkMotImport() {
 
 // ---------- Kvote og «ferdig» ----------
 // Hver vær skal brukes like mye i hver besetning i forhold til antall avlssøyer:
-// kvote = (avlssøyer minus søyer paret med andre værer) / antall prøvevær, avrundet
+// kvote = (avlssøyer minus søyer paret med værer utenfor prøveværene) / antall prøvevær, avrundet
 // (48 søyer / 16 værer = 3 parringer). Kvoten er et veiledende tak, ikke en hard grense.
+// «Utenfor prøveværene» er alt som ikke er prøvevær: andre værer, seminelite, granska vær osv.
+// Det regnes ut som «Sum alle værer» minus «Sum Prøvevær».
 // En vær er «ferdig» hos et medlem når antall parringer har nådd kvoten.
+function utenforProve(x) {
+    return imp.harAlle ? Math.max(0, x.alle - x.prove) : x.andre;
+}
 function kvote(m) {
     const n = Object.keys(imp.vaerer).length || 1;
     const x = imp.medlem[m.id];
-    return Math.round(Math.max(0, x.soyer - x.andre) / n);
+    return Math.round(Math.max(0, x.soyer - utenforProve(x)) / n);
 }
 const utfort = (m, nr) => imp.vaerer[nr] ? imp.vaerer[nr].perProdusent[m.id] : 0;
 const igjenHos = (m, nr) => Math.max(0, kvote(m) - utfort(m, nr));
@@ -285,15 +308,16 @@ function visAvdeling(avd) {
             <p class="stat"><b>Gjenstår:</b> ${s ? s.mangler : "-"} søyer
                (av ${s ? s.soyer : "-"} avlssøyer)</p>
             <p class="stat"><b>Netto paringer:</b> ${s ? s.netto : "-"}
-               ${s && s.andre ? `(hvorav ${s.andre} på andre værer)` : ""}</p>`;
+               ${s && utenforProve(s) ? `(hvorav ${utenforProve(s)} på værer utenfor prøveværene)` : ""}</p>`;
 
         vaerData.filter(v => v["Hos"] === m.navn).forEach(v => {
             const info = imp ? imp.vaerer[v["Kåringsnr"]] : null;
             html += `
             <div class="vaer" onclick="visVaer('${esc(v["Kåringsnr"])}', '${avd}')">
                 <span>${stjerne(v["Kåringsnr"])}${esc(v["Vær"])}
-                    ${info && erFerdig(m, v["Kåringsnr"]) ? '<span class="ferdig">Ferdig</span>' : ""}</span>
-                <strong>${info ? info.netto : "-"}</strong>
+                    ${info && erFerdig(m, v["Kåringsnr"]) ? '<span class="ferdig">Ferdig</span>' : ""}
+                    ${info ? `<small style="display:block;color:#666">Hos ${esc(m.navn)}: ${utfort(m, v["Kåringsnr"])} / ${kvote(m)}</small>` : ""}</span>
+                <span style="text-align:right"><strong>${info ? info.netto : "-"}</strong>${info ? '<small style="display:block;color:#777">totalt</small>' : ""}</span>
             </div>`;
         });
         html += `</div>`;
@@ -326,7 +350,7 @@ function visVaer(karingsnr, avd) {
         <hr>
         ${info ? `
         <p><b>Netto paringer:</b> ${info.netto}</p>
-        <p class="notat">Parringer hos hvert medlem, av kvoten (avlssøyer minus søyer paret med andre værer, ÷ antall værer).</p>
+        <p class="notat">Parringer hos hvert medlem, av kvoten (avlssøyer minus søyer paret med andre værer og semin, ÷ antall værer).</p>
         <table>${rader}</table>`
         : `<p style="color:red">Fant ikke denne væren i import.csv.</p>`}
     </div>`;
@@ -392,15 +416,33 @@ window.addEventListener("appinstalled", () => {
     if (visning === visForside) visForside();
 });
 
+const erSamsungNett = () => /SamsungBrowser/i.test(navigator.userAgent);
+
 function installKnapp() {
-    const mobil = erIOS() || /android/i.test(navigator.userAgent);
+    const android = /android/i.test(navigator.userAgent);
+    const mobil = erIOS() || android;
     if (erApp() || !(installPrompt || mobil)) return "";   // skjules når den allerede er en app
+    if (erSamsungNett()) return `
+    <div class="installer" onclick="kopierAdresse()">Kopier adressen for å installere i Chrome</div>
+    <div id="installHjelp" class="feil" style="display:none"></div>`;
     const hjelp = erIOS()
         ? "Trykk på Del-ikonet (firkanten med pil opp) i Safari, velg «Legg til på Hjem-skjerm», og trykk «Legg til»."
         : "Åpne nettleserens meny (⋮) og velg «Installer app» eller «Legg til på startskjermen».";
     return `
     <div class="installer" onclick="installer()">Last ned som app</div>
-    <div id="installHjelp" class="feil" style="display:none">${hjelp}</div>`;
+    <div id="installHjelp" class="feil" style="display:none">${hjelp}</div>
+    ${android ? '<p class="notat">Stopper installeringen? Åpne siden i Chrome, eller bruk menyen (⋮) → «Legg til på startskjermen» → «Opprett snarvei» hvis den finnes.</p>' : ""}`;
+}
+
+async function kopierAdresse() {
+    let ok = false;
+    try { await navigator.clipboard.writeText(location.href.split("#")[0]); ok = true; } catch (e) {}
+    const h = document.getElementById("installHjelp");
+    if (!h) return;
+    h.textContent = (ok ? "Adressen er kopiert. " : "") +
+        "Åpne Chrome, " + (ok ? "lim den inn i adressefeltet" : "skriv inn adressen") +
+        ", trykk på menyen (⋮) og velg «Installer app». Installering fra Samsung Internet kan bli blokkert av Google Play Protect.";
+    h.style.display = "block";
 }
 
 async function installer() {
