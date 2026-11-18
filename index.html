@@ -176,7 +176,8 @@ function tolkImport(rows) {
     const nettoKol = hdr.findIndex(c => rens(c).toLowerCase().startsWith("netto paringer"));
 
     const res = { vaerer: {}, medlem: {} };
-    MEDLEMMER.forEach(m => { res.medlem[m.id] = { netto: 0, andre: 0, soyer: 0, mangler: 0 }; });
+    MEDLEMMER.forEach(m => { res.medlem[m.id] = { netto: 0, andre: 0, alle: 0, prove: 0, soyer: 0, mangler: 0 }; });
+    res.harAlle = false;
 
     const settMedlem = (felt, r) => {
         MEDLEMMER.forEach(m => {
@@ -194,7 +195,7 @@ function tolkImport(rows) {
         const nr = (label.match(/\d{9,}/) || [])[0];
 
         if (lower === "prøvevær") { iProve = true; continue; }
-        if (lower.startsWith("sum prøvevær")) { iProve = false; continue; }
+        if (lower.startsWith("sum prøvevær")) { iProve = false; settMedlem("prove", r); continue; }
 
         if (nr) {
             if (!iProve) continue;
@@ -211,6 +212,7 @@ function tolkImport(rows) {
             };
         } else if (lower.startsWith("netto paringer")) settMedlem("netto", r);
         else if (lower.startsWith("sum andre")) settMedlem("andre", r);
+        else if (lower.startsWith("sum alle")) { settMedlem("alle", r); res.harAlle = true; }
         else if (lower.startsWith("antall avlss")) settMedlem("soyer", r);
         else if (lower.startsWith("mangler paring")) settMedlem("mangler", r);
     }
@@ -253,13 +255,18 @@ function sjekkMotImport() {
 
 // ---------- Kvote og «ferdig» ----------
 // Hver vær skal brukes like mye i hver besetning i forhold til antall avlssøyer:
-// kvote = (avlssøyer minus søyer paret med andre værer) / antall prøvevær, avrundet
+// kvote = (avlssøyer minus søyer paret med værer utenfor prøveværene) / antall prøvevær, avrundet
 // (48 søyer / 16 værer = 3 parringer). Kvoten er et veiledende tak, ikke en hard grense.
+// «Utenfor prøveværene» er alt som ikke er prøvevær: andre værer, seminelite, granska vær osv.
+// Det regnes ut som «Sum alle værer» minus «Sum Prøvevær».
 // En vær er «ferdig» hos et medlem når antall parringer har nådd kvoten.
+function utenforProve(x) {
+    return imp.harAlle ? Math.max(0, x.alle - x.prove) : x.andre;
+}
 function kvote(m) {
     const n = Object.keys(imp.vaerer).length || 1;
     const x = imp.medlem[m.id];
-    return Math.round(Math.max(0, x.soyer - x.andre) / n);
+    return Math.round(Math.max(0, x.soyer - utenforProve(x)) / n);
 }
 const utfort = (m, nr) => imp.vaerer[nr] ? imp.vaerer[nr].perProdusent[m.id] : 0;
 const igjenHos = (m, nr) => Math.max(0, kvote(m) - utfort(m, nr));
@@ -301,15 +308,16 @@ function visAvdeling(avd) {
             <p class="stat"><b>Gjenstår:</b> ${s ? s.mangler : "-"} søyer
                (av ${s ? s.soyer : "-"} avlssøyer)</p>
             <p class="stat"><b>Netto paringer:</b> ${s ? s.netto : "-"}
-               ${s && s.andre ? `(hvorav ${s.andre} på andre værer)` : ""}</p>`;
+               ${s && utenforProve(s) ? `(hvorav ${utenforProve(s)} på værer utenfor prøveværene)` : ""}</p>`;
 
         vaerData.filter(v => v["Hos"] === m.navn).forEach(v => {
             const info = imp ? imp.vaerer[v["Kåringsnr"]] : null;
             html += `
             <div class="vaer" onclick="visVaer('${esc(v["Kåringsnr"])}', '${avd}')">
                 <span>${stjerne(v["Kåringsnr"])}${esc(v["Vær"])}
-                    ${info && erFerdig(m, v["Kåringsnr"]) ? '<span class="ferdig">Ferdig</span>' : ""}</span>
-                <strong>${info ? info.netto : "-"}</strong>
+                    ${info && erFerdig(m, v["Kåringsnr"]) ? '<span class="ferdig">Ferdig</span>' : ""}
+                    ${info ? `<small style="display:block;color:#666">Hos ${esc(m.navn)}: ${utfort(m, v["Kåringsnr"])} / ${kvote(m)}</small>` : ""}</span>
+                <span style="text-align:right"><strong>${info ? info.netto : "-"}</strong>${info ? '<small style="display:block;color:#777">totalt</small>' : ""}</span>
             </div>`;
         });
         html += `</div>`;
@@ -342,7 +350,7 @@ function visVaer(karingsnr, avd) {
         <hr>
         ${info ? `
         <p><b>Netto paringer:</b> ${info.netto}</p>
-        <p class="notat">Parringer hos hvert medlem, av kvoten (avlssøyer minus søyer paret med andre værer, ÷ antall værer).</p>
+        <p class="notat">Parringer hos hvert medlem, av kvoten (avlssøyer minus søyer paret med andre værer og semin, ÷ antall værer).</p>
         <table>${rader}</table>`
         : `<p style="color:red">Fant ikke denne væren i import.csv.</p>`}
     </div>`;
@@ -659,8 +667,25 @@ function hent(fil) {
 
 let sisteLast = 0, pagaar = null;
 
+// Har det kommet en nyere versjon av selve siden (index.html)? Da lastes den på nytt.
+// Hindrer at noen blir sittende med en gammel utgave etter at du har lastet opp en ny.
+// Maks én automatisk lasting per to minutter, så den aldri kan gå i løkke.
+function sjekkNyVersjon() {
+    if (navigator.onLine === false) return;
+    fetch(location.pathname, { method: "HEAD", cache: "no-cache" }).then(r => {
+        const ny = new Date(r.headers.get("Last-Modified")), denne = new Date(document.lastModified);
+        if (!r.ok || isNaN(ny) || isNaN(denne) || ny <= denne) return;
+        let sist = 0;
+        try { sist = +sessionStorage.getItem("vaerring_reload") || 0; } catch (e) {}
+        if (Date.now() - sist < 120000) return;
+        try { sessionStorage.setItem("vaerring_reload", String(Date.now())); } catch (e) {}
+        location.reload();
+    }).catch(() => {});
+}
+
 // Henter data på nytt og tegner den siden brukeren står på
 function last() {
+    sjekkNyVersjon();
     if (pagaar) return pagaar;
     pagaar = Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
     advarsler = [];
