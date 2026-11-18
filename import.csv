@@ -15,13 +15,13 @@ Prøvevær,,,,,,,,,,
 "NESTHUN BAS...
 202613369",,,,,2,8,10,0,0 %,10
 "NESTHUN TOR...
-202613374",,,,,,7,7,0,0 %,7
+202613374",,,,,3,7,10,0,0 %,10
 "NESTHUN STY...
 202613375",,,,,1,10,11,0,0 %,11
 "NESTHUN GRI...
-202613378",,,,6,,,6,0,0 %,6
+202613378",,,,9,,,9,0,0 %,9
 "NESTHUN MÆL...
-202613384",,,,8,,,8,0,0 %,8
+202613384",,,,10,,,10,0,0 %,10
 "DØRÅS GRIMM...
 202613388",,,,,,3,3,0,0 %,3
 "JESNES GLYP...
@@ -42,7 +42,7 @@ Prøvevær,,,,,,,,,,
 202613410",,,,,,,0,0,,0
 "ØVERAASEN I...
 202613415",,,2,,,,2,0,0 %,2
-Sum Prøvevær,,,5,14,5,28,52,0,0 %,52
+Sum Prøvevær,,,5,19,8,28,60,0,0 %,60
 Seminelite,,,,,,,,,,
 "PARELIUS
 202525057",,,,,,1,1,0,0 %,1
@@ -62,11 +62,11 @@ Granska vær,,,,,,,,,,
 202413292",,,,,,31,31,0,0 %,31
 Sum Granska vær,,,,,,31,31,0,0 %,31
 Sum andre værer,,,,9,,5,14,0,0 %,14
-Sum alle værer,,,6,23,6,68,103,0,0 %,103
-Netto paringer,0,0,6,22,6,68,102,,,
+Sum alle værer,,,6,28,9,68,111,0,0 %,111
+Netto paringer,0,0,6,27,9,68,110,,,
 ,,,,,,,,,,
 "Ikke para (kode 10, 11, 12 og 13)",0,0,0,0,0,0,0,,,
 Antall avlssøyer,97,126,48,225,128,152,776,,,
-Mangler paring,97,126,42,203,122,84,674,,,
+Mangler paring,97,126,42,198,119,84,666,,,
 ,,,,,,,,,,
-Sauekontrollen 3.8.5 @ Animalia | Personvern og bruk av informasjonskapsler (cookies),,,,,,,,,,
+Sauekontrollen 3.8.6 @ Animalia | Personvern og bruk av informasjonskapsler (cookies),,,,,,,,,,
