@@ -667,8 +667,25 @@ function hent(fil) {
 
 let sisteLast = 0, pagaar = null;
 
+// Har det kommet en nyere versjon av selve siden (index.html)? Da lastes den på nytt.
+// Hindrer at noen blir sittende med en gammel utgave etter at du har lastet opp en ny.
+// Maks én automatisk lasting per to minutter, så den aldri kan gå i løkke.
+function sjekkNyVersjon() {
+    if (navigator.onLine === false) return;
+    fetch(location.pathname, { method: "HEAD", cache: "no-cache" }).then(r => {
+        const ny = new Date(r.headers.get("Last-Modified")), denne = new Date(document.lastModified);
+        if (!r.ok || isNaN(ny) || isNaN(denne) || ny <= denne) return;
+        let sist = 0;
+        try { sist = +sessionStorage.getItem("vaerring_reload") || 0; } catch (e) {}
+        if (Date.now() - sist < 120000) return;
+        try { sessionStorage.setItem("vaerring_reload", String(Date.now())); } catch (e) {}
+        location.reload();
+    }).catch(() => {});
+}
+
 // Henter data på nytt og tegner den siden brukeren står på
 function last() {
+    sjekkNyVersjon();
     if (pagaar) return pagaar;
     pagaar = Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
     advarsler = [];
