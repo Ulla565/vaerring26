@@ -13,17 +13,17 @@ Bernt Jesnes","3414036784
 Per Jonas Mobr...",Totalt,Omløp,Omløp %,Netto paringer
 Prøvevær,,,,,,,,,,
 "NESTHUN BAS...
-202613369",,,,,,8,8,0,0 %,8
+202613369",,,,,2,8,10,0,0 %,10
 "NESTHUN TOR...
 202613374",,,,,,7,7,0,0 %,7
 "NESTHUN STY...
-202613375",,,,,,10,10,0,0 %,10
+202613375",,,,,1,10,11,0,0 %,11
 "NESTHUN GRI...
 202613378",,,,6,,,6,0,0 %,6
 "NESTHUN MÆL...
 202613384",,,,8,,,8,0,0 %,8
 "DØRÅS GRIMM...
-202613388",,,,,,1,1,0,0 %,1
+202613388",,,,,,3,3,0,0 %,3
 "JESNES GLYP...
 202613390",,,,,2,,2,0,0 %,2
 "JESNES INGE...
@@ -42,7 +42,7 @@ Prøvevær,,,,,,,,,,
 202613410",,,,,,,0,0,,0
 "ØVERAASEN I...
 202613415",,,2,,,,2,0,0 %,2
-Sum Prøvevær,,,5,14,2,26,47,0,0 %,47
+Sum Prøvevær,,,5,14,5,28,52,0,0 %,52
 Seminelite,,,,,,,,,,
 "PARELIUS
 202525057",,,,,,1,1,0,0 %,1
@@ -62,11 +62,11 @@ Granska vær,,,,,,,,,,
 202413292",,,,,,31,31,0,0 %,31
 Sum Granska vær,,,,,,31,31,0,0 %,31
 Sum andre værer,,,,9,,5,14,0,0 %,14
-Sum alle værer,,,6,23,3,66,98,0,0 %,98
-Netto paringer,0,0,6,22,3,66,97,,,
+Sum alle værer,,,6,23,6,68,103,0,0 %,103
+Netto paringer,0,0,6,22,6,68,102,,,
 ,,,,,,,,,,
 "Ikke para (kode 10, 11, 12 og 13)",0,0,0,0,0,0,0,,,
 Antall avlssøyer,97,126,48,225,128,152,776,,,
-Mangler paring,97,126,42,203,125,86,679,,,
+Mangler paring,97,126,42,203,122,84,674,,,
 ,,,,,,,,,,
 Sauekontrollen 3.8.5 @ Animalia | Personvern og bruk av informasjonskapsler (cookies),,,,,,,,,,
