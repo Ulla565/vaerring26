@@ -342,7 +342,7 @@ function visForside() {
     ${AVDELINGER.map(a => `
     <div class="knapp" onclick="visAvdeling('${a}')">
         ${a.toUpperCase()} AVD.<br>${antall(a)} værer
-        ${hviler(a) ? `<span class="hvilesum">(${hviler(a)} hviler)</span>` : ""}
+        ${hviler(a) ? `<span class="hvilesum">(hvorav ${hviler(a)} hviler)</span>` : ""}
     </div>`).join("")}
     ${imp ? `
     <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>
