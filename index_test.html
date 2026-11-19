@@ -45,6 +45,7 @@ html,body{overscroll-behavior-y:contain}
 .installer{display:block;padding:14px;background:#5fa832;color:white;margin:20px 0;border-radius:10px;text-align:center;font-size:18px;font-weight:bold;cursor:pointer}
 .snarvei{display:block;padding:12px;margin:26px 0 20px;border:1px solid #ccc;border-radius:10px;text-align:center;font-size:16px;color:#444;text-decoration:none}
 .snarvei:active{background:#e8e8e8}
+.hvilesum{display:block;font-size:14px;font-weight:normal;color:#888;margin-top:2px}
 .obs{display:inline-block;background:#ffe08a;color:#7a4b00;font-size:12px;font-weight:bold;padding:2px 8px;border-radius:10px;margin-left:4px;vertical-align:middle;white-space:nowrap}
 #port{position:fixed;inset:0;background:#f3f3f3;z-index:100;display:none;align-items:center;justify-content:center;padding:20px}
 .portboks{text-align:center;max-width:320px;width:100%}
@@ -111,7 +112,7 @@ const stjerne = nr => erStjerne(nr) ? '<span class="stjerne">★</span> ' : "";
 // Kilde: kolonnen «Obs» i appdata.csv.
 //  - Dato (f.eks. 19.11.2026): merket vises til og med dagen før OBS_DAGER dager er gått, og forsvinner så av seg selv.
 //  - Tekst (f.eks. «Halt»): merket vises så lenge det står noe i feltet. Tøm feltet for å fjerne merket.
-const OBS_DAGER = 3;
+const OBS_DAGER = 2;
 const pad2 = n => String(n).padStart(2, "0");
 
 // Dagens dato i Norge, som antall millisekunder ved midnatt (UTC), så datoer kan sammenlignes rett fram
@@ -328,6 +329,9 @@ function visForside() {
     const antall = avd => MEDLEMMER
         .filter(m => m.avd === avd)
         .reduce((s, m) => s + vaerData.filter(v => v["Hos"] === m.navn).length, 0);
+    const hviler = avd => MEDLEMMER
+        .filter(m => m.avd === avd)
+        .reduce((s, m) => s + vaerData.filter(v => v["Hos"] === m.navn && obsAktiv(v)).length, 0);
 
     document.getElementById("app").innerHTML = `
     ${advarsler.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
@@ -338,6 +342,7 @@ function visForside() {
     ${AVDELINGER.map(a => `
     <div class="knapp" onclick="visAvdeling('${a}')">
         ${a.toUpperCase()} AVD.<br>${antall(a)} værer
+        ${hviler(a) ? `<span class="hvilesum">(${hviler(a)} hviler)</span>` : ""}
     </div>`).join("")}
     ${imp ? `
     <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>
