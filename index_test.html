@@ -45,6 +45,20 @@ html,body{overscroll-behavior-y:contain}
 .installer{display:block;padding:14px;background:#5fa832;color:white;margin:20px 0;border-radius:10px;text-align:center;font-size:18px;font-weight:bold;cursor:pointer}
 .snarvei{display:block;padding:12px;margin:26px 0 20px;border:1px solid #ccc;border-radius:10px;text-align:center;font-size:16px;color:#444;text-decoration:none}
 .snarvei:active{background:#e8e8e8}
+.lapper{margin-top:24px}
+.lapp{background:#fff59d;color:#333;padding:12px 14px 10px;margin:0 0 14px;border-radius:2px;box-shadow:0 2px 6px rgba(0,0,0,.18);transform:rotate(-.6deg);font-size:15px;line-height:1.4}
+.lapp:nth-child(even){transform:rotate(.5deg)}
+.lapp .tekst{white-space:pre-wrap;overflow-wrap:anywhere}
+.lapp .fot{display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:12px;color:#6b5f00}
+.lapp .slett{cursor:pointer;text-decoration:underline;white-space:nowrap}
+.skjema{background:white;border-radius:10px;padding:14px;margin:10px 0}
+.skjema label{display:block;font-weight:bold;font-size:14px;margin-top:4px}
+.skjema select,.skjema input,.skjema textarea{width:100%;box-sizing:border-box;font-size:16px;padding:8px;margin:4px 0 10px;border:1px solid #ccc;border-radius:8px;font-family:inherit}
+.skjema textarea{min-height:80px;resize:vertical}
+.skjema .rad{display:flex;gap:10px}
+.skjema .rad .liten{flex:1;text-align:center;margin:0}
+.liten.ok{background:#5fa832;color:white;border-color:#5fa832}
+.skjemafeil{color:#c62828;min-height:20px;font-size:14px;margin-bottom:6px}
 .hvilesum{display:block;font-size:14px;font-weight:normal;color:#888;margin-top:2px}
 .obs{display:inline-block;background:#ffe08a;color:#7a4b00;font-size:12px;font-weight:bold;padding:2px 8px;border-radius:10px;margin-left:4px;vertical-align:middle;white-space:nowrap}
 #port{position:fixed;inset:0;background:#f3f3f3;z-index:100;display:none;align-items:center;justify-content:center;padding:20px}
@@ -342,7 +356,7 @@ function visForside() {
     ${AVDELINGER.map(a => `
     <div class="knapp" onclick="visAvdeling('${a}')">
         ${a.toUpperCase()} AVD.<br>${antall(a)} værer
-        ${hviler(a) ? `<span class="hvilesum">(${hviler(a)} hviler)</span>` : ""}
+        ${hviler(a) ? `<span class="hvilesum">(hvorav ${hviler(a)} hviler)</span>` : ""}
     </div>`).join("")}
     ${imp ? `
     <div class="knapp" onclick="visTotal()">TOTALOVERSIKT</div>
@@ -378,7 +392,9 @@ function visAvdeling(avd) {
         html += `</div>`;
     });
 
+    if (harBeskjeder()) html += `<div class="lapper" id="lapper"></div><div id="nyBeskjed">${beskjedKnapp()}</div>`;
     document.getElementById("app").innerHTML = html;
+    tegnLapper();
 }
 
 function visVaer(karingsnr, avd) {
@@ -455,6 +471,112 @@ function visTotal() {
             <div class="mal" style="left:${malPos}%"></div>
         </div>
     </div>`).join("")}`;
+}
+
+// ---------- Beskjeder (gule lapper) ----------
+// Lagres i et Google-regneark via et lite skript (Kode.gs). Står adressen tom, skjules funksjonen helt.
+const BESKJED_URL = "https://script.google.com/macros/s/AKfycbyD8od-cGRmBTuPGwmd-IRe7-niwWHm-QVJUoV7_59X_KqruhEJ1GSp4OOOJtkmfrGN/exec";   // lim inn adressen til nettappen (slutter på /exec)
+let beskjeder = [];
+
+const harBeskjeder = () => !!BESKJED_URL;
+const skjemaApen = () => !!document.getElementById("bTekst");
+
+const lappTid = iso => new Date(iso).toLocaleString("nb-NO", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Oslo"
+});
+
+async function lastBeskjeder() {
+    if (!harBeskjeder()) return;
+    try {
+        const r = await fetch(BESKJED_URL + "?t=" + Date.now());
+        const d = await r.json();
+        if (d.ok) { beskjeder = d.beskjeder; tegnLapper(); }
+    } catch (e) { /* uten nett beholdes det som allerede er hentet */ }
+}
+
+function tegnLapper() {
+    const el = document.getElementById("lapper");
+    if (!el) return;
+    el.innerHTML = beskjeder.map(b => `
+        <div class="lapp">
+            <div class="tekst">${esc(b.tekst)}</div>
+            <div class="fot"><span>${esc(b.navn)}, ${esc(lappTid(b.tid))}</span>
+                <span class="slett" onclick="slettBeskjed('${esc(b.id)}')">Slett</span></div>
+        </div>`).join("");
+}
+
+async function sendBeskjed(data) {
+    try {
+        // Ren tekst i kroppen, så nettleseren ikke trenger forhåndssjekk (CORS) mot Google
+        const r = await fetch(BESKJED_URL, { method: "POST", body: JSON.stringify(data) });
+        return await r.json();
+    } catch (e) {
+        return { ok: false, feil: "Fikk ikke kontakt. Sjekk nettet og prøv igjen." };
+    }
+}
+
+const beskjedKnapp = () => `<div class="liten" onclick="apneSkjema()">✎ Ny beskjed</div>`;
+
+function apneSkjema() {
+    let sist = "";
+    try { sist = localStorage.getItem("vaerring_navn") || ""; } catch (e) {}
+    document.getElementById("nyBeskjed").innerHTML = `
+    <div class="skjema">
+        <label for="bNavn">Navn</label>
+        <select id="bNavn"><option value="">Velg navn</option>${
+            MEDLEMMER.map(m => `<option${m.navn === sist ? " selected" : ""}>${esc(m.navn)}</option>`).join("")}</select>
+        <label for="bKode">Kode</label>
+        <input id="bKode" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off">
+        <label for="bTekst">Beskjed</label>
+        <textarea id="bTekst" maxlength="200"
+            oninput="document.getElementById('bTeller').textContent = this.value.length + ' / 200'"></textarea>
+        <div class="notat" id="bTeller">0 / 200</div>
+        <div class="skjemafeil" id="bFeil"></div>
+        <div class="rad">
+            <div class="liten ok" id="bSend" onclick="sendSkjema()">Legg ut</div>
+            <div class="liten" onclick="lukkSkjema()">Avbryt</div>
+        </div>
+    </div>`;
+}
+
+function lukkSkjema() {
+    const el = document.getElementById("nyBeskjed");
+    if (el) el.innerHTML = beskjedKnapp();
+}
+
+let sender = false;
+async function sendSkjema() {
+    if (sender) return;
+    const navn = document.getElementById("bNavn").value;
+    const kode = document.getElementById("bKode").value;
+    const tekst = document.getElementById("bTekst").value.trim();
+    const feil = document.getElementById("bFeil");
+    const knapp = document.getElementById("bSend");
+
+    if (!navn) { feil.textContent = "Velg navnet ditt."; return; }
+    if (kode.length < 4) { feil.textContent = "Skriv inn koden."; return; }
+    if (!tekst) { feil.textContent = "Skriv en beskjed først."; return; }
+
+    sender = true; feil.textContent = ""; knapp.textContent = "Sender...";
+    const d = await sendBeskjed({ handling: "ny", navn, tekst, kode });
+    sender = false;
+
+    if (d.ok) {
+        try { localStorage.setItem("vaerring_navn", navn); } catch (e) {}
+        lukkSkjema();
+        await lastBeskjeder();
+    } else {
+        feil.textContent = d.feil || "Noe gikk galt.";
+        knapp.textContent = "Legg ut";
+    }
+}
+
+async function slettBeskjed(id) {
+    const kode = prompt("Skriv koden for å slette denne beskjeden:");
+    if (!kode) return;
+    const d = await sendBeskjed({ handling: "slett", id, kode });
+    if (d.ok) await lastBeskjeder();
+    else alert(d.feil || "Kunne ikke slette.");
 }
 
 // ---------- Installer som app ----------
@@ -744,6 +866,7 @@ function sjekkNyVersjon() {
 // Henter data på nytt og tegner den siden brukeren står på
 function last() {
     sjekkNyVersjon();
+    lastBeskjeder();
     if (pagaar) return pagaar;
     pagaar = Promise.allSettled([hent("appdata.csv"), hent("import.csv")]).then(([a, i]) => {
     advarsler = [];
@@ -774,9 +897,11 @@ function last() {
         else if (a.status === "fulfilled") advarsler.push(...sjekkMotImport());
     } else advarsler.push("Kunne ikke lese import.csv.");
 
-    const y = window.scrollY;
-    (visning || visForside)();
-    window.scrollTo(0, y);
+    if (!skjemaApen()) {   // ikke ta bort et halvskrevet skjema
+        const y = window.scrollY;
+        (visning || visForside)();
+        window.scrollTo(0, y);
+    }
     }).finally(() => { pagaar = null; sisteLast = Date.now(); });
     return pagaar;
 }
