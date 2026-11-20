@@ -1084,6 +1084,11 @@ function lagForslag(medBytte) {
         }
     });
 
+    const [stN, stS] = res.stjerner.etter;
+    if ((stN === 0 || stS === 0) && STJERNER.length >= 2) K.push({ ok: false,
+        tekst: `${stN === 0 ? "Nordre" : "Søndre"} står uten stjernevær etter flyttingene (Nordre ${stN} / Søndre ${stS}). ` +
+               "Sjekk de prioriterte ønskene, eller legg inn et ønske som flytter en stjernevær dit." });
+
     if (medBytte) {
         const sjekk = (fraAvd, tilAvd, onsket, retning) => {
             const n = kryss(fraAvd, tilAvd);
@@ -1397,7 +1402,8 @@ function visLogistikk() {
     </div>
     <p class="notat">Rekkefølge for automatisk beregning: 1. evt. prioriterte ønsker (faste føringer), 2. evt. endringer i antall per medlem,
         3. flytting innad i avdelingene, 4. bytte mellom avdelingene, og til slutt 5. flytting så alle ender med ønsket antall.
-        De som har flest søyer igjen å pare får flest værer. Værer med 💤 Hvile foreslås ikke flyttet.
+        De som har flest søyer igjen å pare får flest værer. Stjerneværene (<span class="stjerne">★</span>) fordeles
+        så jevnt som mulig, slik at det er minst én i hver avdeling. Værer med 💤 Hvile foreslås ikke flyttet.
         De automatiske forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
     ${forutsetningerHtml(f)}
     ${f.foringsfeil.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
