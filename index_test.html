@@ -662,6 +662,7 @@ async function installer() {
 // 2) Bytte mellom Nordre og Søndre: Foreslås bare når minst BYTTE_VAERER værer er ferdige hos minst
 //    BYTTE_MEDLEMMER medlemmer (eller når du ber om det). De som er mest ferdige i egen avdeling og
 //    har mest igjen i den andre prioriteres, og stjerneværene holdes jevnt fordelt.
+// Værer med aktivt hvile-merke (Obs i appdata.csv) foreslås ikke flyttet, med mindre de står i en fast føring.
 // 3) Forslaget kan låses. Da legges det som en gul huskelapp nederst på Logistikk-siden (lagres på denne enheten).
 const ANTALL_BYTTE = 4;        // standard antall værer hver vei i et bytte
 const MAKS_BYTTE = 8;          // høyeste antall som kan velges per retning
@@ -776,7 +777,7 @@ function lagForslag(medBytte) {
         faste: [], foringsfeil: [],
         intern: { "Søndre": [], "Nordre": [] },
         bytte: { tilSor: [], tilNord: [], onsketSor: 0, onsketNord: 0, fastSor: 0, fastNord: 0 },
-        stjerner: null, ferdigOveralt: [], utenForslag: 0
+        stjerner: null, ferdigOveralt: [], utenForslag: 0, hviler: []
     };
     const flyttet = new Set();
 
@@ -809,9 +810,13 @@ function lagForslag(medBytte) {
     const etterFaste = flyttStjerner(foer, res.faste);
     res.stjerner = { foer, etter: etterFaste };
 
+    // Værer med hvile-merke (Obs) foreslås ikke flyttet. En fast føring overstyrer dette.
+    const hviler = new Set(vaerer.filter(v => !flyttet.has(v.nr) && obsAktiv(vaerData.find(x => x["Kåringsnr"] === v.nr))).map(v => v.nr));
+    res.hviler = vaerer.filter(v => hviler.has(v.nr));
+
     // 1) Innad i avdelingene
     for (const v of vaerer) {
-        if (flyttet.has(v.nr) || !erFerdig(v.fra, v.nr)) continue;
+        if (flyttet.has(v.nr) || hviler.has(v.nr) || !erFerdig(v.fra, v.nr)) continue;
         const til = mottaker(MEDLEMMER.filter(m => m.avd === v.fra.avd), v);
         if (!til) continue;
         inn[til.id]++;
@@ -827,7 +832,7 @@ function lagForslag(medBytte) {
 
     if (medBytte) {
         const kandidater = avd => vaerer
-            .filter(v => v.fra.avd === avd && !flyttet.has(v.nr))
+            .filter(v => v.fra.avd === avd && !flyttet.has(v.nr) && !hviler.has(v.nr))
             .map(v => ({ ...v, poeng: restI(andreAvd(avd), v.nr) - restI(avd, v.nr), annet: restI(andreAvd(avd), v.nr) }))
             .filter(v => v.annet > 0)   // må ha noe igjen å gjøre i den andre avdelingen
             .sort((a, b) => b.poeng - a.poeng)
@@ -867,7 +872,7 @@ function lagForslag(medBytte) {
     }
 
     for (const v of vaerer) {
-        if (flyttet.has(v.nr)) continue;
+        if (flyttet.has(v.nr) || hviler.has(v.nr)) continue;
         if (erFerdig(v.fra, v.nr) && restI("Nordre", v.nr) + restI("Søndre", v.nr) === 0) res.ferdigOveralt.push(v);
         else res.utenForslag++;
     }
@@ -1034,7 +1039,7 @@ function visLogistikk() {
     ${advarsler.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     <h2>Logistikk</h2>
     <p class="notat">Faste føringer legges inn først, deretter flytting innad i avdelingene. De som har flest søyer
-        igjen å pare får flest værer. Forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
+        igjen å pare får flest værer. Værer med 💤 Hvile foreslås ikke flyttet. Forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
     ${forutsetningerHtml()}
     ${f.foringsfeil.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     ${f.faste.length ? seksjon("Faste føringer", f.faste) : ""}
@@ -1048,6 +1053,8 @@ function visLogistikk() {
 
     <p class="notat" style="margin-top:20px">
         ${f.utenForslag} værer blir stående der de er.
+        ${f.hviler.length ? `Hviler og flyttes ikke: ${f.hviler.map(v => stjerne(v.nr) + esc(v.navn)).join(", ")}.
+            Legg inn en fast føring hvis en av dem likevel skal flyttes.` : ""}
         ${f.ferdigOveralt.length ? `Ferdige hos alle: ${f.ferdigOveralt.map(v => stjerne(v.nr) + esc(v.navn)).join(", ")}.` : ""}
     </p>
     <div class="installer" onclick="laasForslag()">🔒 Lås forslaget som huskelapp</div>
