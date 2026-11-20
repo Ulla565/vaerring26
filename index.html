@@ -134,9 +134,14 @@ td:last-child{text-align:right;font-weight:bold}
 <div class="bunn">
     <div id="sist"></div>
     <div>Utviklet av Johanne Ulrica Øveraasen &copy; 2026</div>
+    <div id="versjon"></div>
 </div>
 
 <script>
+// Versjon av appen. Endres hver gang index.html endres, så det er lett å se om telefonen viser siste utgave.
+const APP_VERSJON = "20.11.2026 kl. 18.40";
+document.getElementById("versjon").textContent = "Versjon " + APP_VERSJON;
+
 // Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
 const MEDLEMMER = [
     { navn: "Per-Joar",   id: "3411086147", avd: "Søndre" },
