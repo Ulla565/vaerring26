@@ -152,7 +152,7 @@ body:not(.forklaringer) .forklaring{display:none}
 
 <script>
 // Versjon av appen. Endres hver gang index.html endres, så det er lett å se om telefonen viser siste utgave.
-const APP_VERSJON = "20.11.2026 kl. 19.25";
+const APP_VERSJON = "20.11.2026 kl. 19.35";
 document.getElementById("versjon").textContent = "Versjon " + APP_VERSJON;
 
 // Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
@@ -721,7 +721,6 @@ async function installer() {
 // De telles likevel med i antallet værer hvert medlem har.
 // Til slutt kontrolleres det om forutsetningene faktisk ble oppfylt.
 // Forslaget kan låses som en gul huskelapp nederst på Logistikk-siden (felles for alle, lagres i Google-regnearket).
-const ANTALL_BYTTE = 4;        // standard antall værer hver vei i et bytte
 const MAKS_BYTTE = 8;          // høyeste antall som kan velges per retning
 const MAKS_FORINGER = 6;       // antall faste føringer
 const MAKS_MAL = 12;           // høyeste «skal ende med» som kan velges
@@ -1065,7 +1064,7 @@ function lagForslag(medBytte) {
     for (const v of vaerer) {
         if (!ledig(v) || !erFerdig(v.fra, v.nr) || faa(v)) continue;
         const til = mottaker(MEDLEMMER.filter(m => m.avd === v.fra.avd), v);
-        if (til) flytt(v, til, res.intern[v.fra.avd]);
+        if (til && igjenHos(til, v.nr) > 0) flytt(v, til, res.intern[v.fra.avd]);   // ellers: kanskje over til den andre avdelingen
     }
 
     // Stjerner per avdeling: [Nordre, Søndre], før og etter alle flyttinger
@@ -1085,10 +1084,11 @@ function lagForslag(medBytte) {
     // 2) Bytte mellom Nordre og Søndre
     const b = res.bytte;
 
-    // Automatisk antall: værene fordeles mellom avdelingene i forhold til hvor mange søyer som er igjen å pare
-    // («Mangler paring»). Hvilende værer telles med. Utgangspunktet er ANTALL_BYTTE hver vei, og den avdelingen
-    // som har for få værer, får i tillegg det den mangler. Er bare én retning satt for hånd, justeres den andre
-    // så forskjellen blir riktig.
+    // Automatisk antall: bare så mange som trengs.
+    //  1) Værer som er ferdige hos alle i sin avdeling, men har mer igjen å gjøre i den andre, må over.
+    //  2) Værene fordeles mellom avdelingene i forhold til hvor mange søyer som er igjen å pare («Mangler paring»).
+    //     Hvilende værer telles med. Avdelingen som har for få, får det den mangler.
+    // Er bare én retning satt for hånd, justeres den andre så fordelingen blir riktig.
     {
         const sumI = (avd, fn) => MEDLEMMER.filter(m => m.avd === avd).reduce((s, m) => s + fn(m), 0);
         // Antall i Nordre før noen flytting mellom avdelingene
@@ -1097,14 +1097,22 @@ function lagForslag(medBytte) {
         const bN = sumI("Nordre", behov), bS = sumI("Søndre", behov);
         const malNord = bN + bS > 0 ? Math.round(totalt * bN / (bN + bS)) : forN;
         const diff = malNord - forN;   // > 0: Nordre trenger flere, < 0: Søndre trenger flere
+        // Værer som er ferdige i sin avdeling og har mer igjen å gjøre i den andre
+        const maaOver = avd => vaerer.filter(v => v.fra.avd === avd && ledig(v) && !unngaa(v) &&
+            restI(avd, v.nr) === 0 && restI(andreAvd(avd), v.nr) > 0).length;
+        const ferdigSor = maaOver("Nordre"), ferdigNord = maaOver("Søndre");
         const s = byttAntall.tilSor, n = byttAntall.tilNord;
         let tilSor, tilNord;
-        if (s === AUTO && n === AUTO) { tilSor = ANTALL_BYTTE + Math.max(0, -diff); tilNord = ANTALL_BYTTE + Math.max(0, diff); }
+        if (s === AUTO && n === AUTO) {
+            tilSor = ferdigSor; tilNord = ferdigNord;
+            const netto = tilNord - tilSor;   // netto til Nordre
+            if (netto < diff) tilNord += diff - netto; else if (netto > diff) tilSor += netto - diff;
+        }
         else if (s === AUTO) { tilNord = n; tilSor = Math.max(0, n - diff); }
         else if (n === AUTO) { tilSor = s; tilNord = Math.max(0, s + diff); }
         else { tilSor = s; tilNord = n; }
         b.onsketSor = Math.min(tilSor, 10); b.onsketNord = Math.min(tilNord, 10);
-        b.auto = { malNord, malSor: totalt - malNord, forN, forS: totalt - forN, totalt, diff };
+        b.auto = { malNord, malSor: totalt - malNord, forN, forS: totalt - forN, totalt, diff, ferdigSor, ferdigNord };
     }
 
     if (medBytte) {
@@ -1487,8 +1495,9 @@ function forutsetningerHtml(f) {
     const autoTekst = a && (byttAntall.tilSor === AUTO || byttAntall.tilNord === AUTO) ? `
         <p class="notat forklaring" style="margin-top:0"><b>Automatisk:</b> Ut fra hvor mange søyer som er igjen å pare, bør Nordre ha
             ca. ${a.malNord} og Søndre ca. ${a.malSor} av ${a.totalt} værer (nå ${a.forN} / ${a.forS}, hvilende værer telles med).
-            Det gir ${bb.onsketSor} sørover og ${bb.onsketNord} nordover.
-            ${byttAntall.tilSor === AUTO && byttAntall.tilNord === AUTO ? `Utgangspunktet er ${ANTALL_BYTTE} hver vei, og den avdelingen som har for få, får i tillegg det som mangler.` : ""}</p>` : "";
+            ${byttAntall.tilSor === AUTO && byttAntall.tilNord === AUTO
+                ? `${a.ferdigSor + a.ferdigNord ? `${a.ferdigSor} i Nordre og ${a.ferdigNord} i Søndre er ferdige i sin avdeling og har mer igjen å gjøre i den andre. ` : ""}`
+                : ""}Det gir ${bb.onsketSor} sørover og ${bb.onsketNord} nordover. Ingen flere flyttes mellom avdelingene enn det som trengs.</p>` : "";
 
     return `
     <div class="skjema">
