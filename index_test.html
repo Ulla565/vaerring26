@@ -963,7 +963,7 @@ function lagForslag(medBytte) {
             const til = mottaker(MEDLEMMER.filter(x => x.avd === m.avd), v)
                      || mottaker(MEDLEMMER.filter(x => x.avd !== m.avd), v);
             if (!til) break;
-            flytt(v, til, res.maaGi, "Må gi");
+            flytt(v, til, res.maaGi);
             trengs--;
         }
     }
@@ -1050,7 +1050,7 @@ function lagForslag(medBytte) {
                 igjenHos(m, c.nr) - igjenHos(m, a.nr) ||                           // mest igjen hos mottakeren
                 antallEtter(c.fra) - antallEtter(a.fra))[0];                       // fra den som har flest
         if (!kilde) break;
-        flytt(kilde, m, res.ekstra, "Mål");
+        flytt(kilde, m, res.ekstra);
     }
 
     for (const v of vaerer) {
@@ -1388,17 +1388,24 @@ function visLogistikk() {
         <h3 class="avsnitt">${tittel}</h3>
         ${fs.length ? kort(fs) : '<p class="notat">Ingen forslag akkurat nå.</p>'}`;
 
-    const b = f.bytte, st = f.stjerner;
-    const harBytte = b.tilSor.length + b.tilNord.length > 0;
+    const st = f.stjerner;
+    // Alle flyttinger samles etter hva som skal kjøres, uansett hvorfor de foreslås
+    // (prioritert ønske, «gi fra seg», ferdig vær, bytte eller ønsket antall).
+    const alle = [...f.faste, ...f.maaGi, ...f.intern["Søndre"], ...f.intern["Nordre"],
+                  ...f.bytte.tilSor, ...f.bytte.tilNord, ...f.ekstra];
+    const innad = avd => alle.filter(x => x.fra.avd === avd && x.til.avd === avd);
+    const mellom = (fra, til) => alle.filter(x => x.fra.avd === fra && x.til.avd === til);
+    const tilSor = mellom("Nordre", "Søndre"), tilNord = mellom("Søndre", "Nordre");
+    const harMellom = tilSor.length + tilNord.length > 0;
 
-    const byttedel = visBytte ? `
-        ${harBytte ? `
-        ${b.tilSor.length ? `<h4>Fra Nordre til Søndre</h4>${kort(b.tilSor)}` : ""}
-        ${b.tilNord.length ? `<h4>Fra Søndre til Nordre</h4>${kort(b.tilNord)}` : ""}`
-        : '<p class="notat">Ingen flere værer skal byttes med disse forutsetningene.</p>'}
-        ${status.trengs ? "" : '<div class="liten" onclick="settByttLikevel(false)">Skjul forslag</div>'}`
-        : `<p class="notat">Ikke nødvendig ennå.</p>
-        <div class="liten" onclick="settByttLikevel(true)">Vis forslag likevel</div>`;
+    const byttedel = `
+        ${harMellom ? `
+        ${tilSor.length ? `<h4>Fra Nordre til Søndre</h4>${kort(tilSor)}` : ""}
+        ${tilNord.length ? `<h4>Fra Søndre til Nordre</h4>${kort(tilNord)}` : ""}`
+        : `<p class="notat">${visBytte ? "Ingen værer skal fraktes mellom avdelingene med disse forutsetningene." : "Ikke nødvendig ennå."}</p>`}
+        ${visBytte
+            ? (status.trengs ? "" : '<div class="liten" onclick="settByttLikevel(false)">Skjul forslag til bytte</div>')
+            : '<div class="liten" onclick="settByttLikevel(true)">Vis forslag til bytte likevel</div>'}`;
 
     document.getElementById("app").innerHTML = `
     <div class="tilbake" onclick="visForside()">← Tilbake</div>
@@ -1418,18 +1425,15 @@ function visLogistikk() {
     ${forutsetningerHtml(f)}
     ${f.foringsfeil.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     ${kontrollHtml(f)}
-    ${f.faste.length ? seksjon("Prioriterte ønsker", f.faste) : ""}
-    ${f.maaGi.length ? seksjon("Må gi fra seg", f.maaGi) : ""}
-    ${seksjon("Innad i Søndre", f.intern["Søndre"])}
-    ${seksjon("Innad i Nordre", f.intern["Nordre"])}
+    ${seksjon("Innad i Søndre", innad("Søndre"))}
+    ${seksjon("Innad i Nordre", innad("Nordre"))}
 
-    <h3 class="avsnitt">Bytte mellom Nordre og Søndre${visBytte && harBytte ? ` (${b.tilSor.length} sørover, ${b.tilNord.length} nordover)` : ""}</h3>
+    <h3 class="avsnitt">Fraktes mellom sør og nord${harMellom ? ` (${tilSor.length} sørover, ${tilNord.length} nordover)` : ""}</h3>
     <p class="notat">Bytte trengs når minst ${BYTTE_VAERER} værer er ferdige hos minst ${BYTTE_MEDLEMMER} av ${MEDLEMMER.length} medlemmer.
         Nå: ${status.ferdige} av ${status.totalt} værer.
         <span class="stjerne">★</span> Stjerneværer, Nordre / Søndre: nå ${st.foer[0]} / ${st.foer[1]},
         etter flyttingene ${st.etter[0]} / ${st.etter[1]}.</p>
     ${byttedel}
-    ${f.ekstra.length ? seksjon("For å nå ønsket antall", f.ekstra) : ""}
 
     <p class="notat" style="margin-top:20px">
         ${f.utenForslag} værer blir stående der de er.
