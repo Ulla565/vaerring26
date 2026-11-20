@@ -115,6 +115,16 @@ td:last-child{text-align:right;font-weight:bold}
 .utvid{border:1px solid #e3e3e3;border-radius:8px;padding:8px 10px;margin:10px 0 12px;background:#fafafa}
 .utvid summary{cursor:pointer;font-weight:bold;font-size:14px;line-height:1.4}
 .utvid[open] summary{margin-bottom:4px}
+.utkast{background:#fff3cd;border:2px solid #e0a800;border-radius:10px;padding:12px;margin:12px 0}
+.utkast .rad select,.utkast .rad input{flex:1;min-width:0;margin:6px 0}
+.meg{background:white;border-left:6px solid #5fa832;border-radius:10px;padding:12px 14px;margin:10px 0 16px}
+.megtopp{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:18px}
+.megtopp select{font-size:16px;padding:6px;border-radius:8px;border:1px solid #ccc;max-width:60%}
+.megdel{margin-top:8px;font-size:16px}
+.megtittel{display:block;font-size:12px;font-weight:bold;color:#666;text-transform:uppercase}
+.megdel ul{list-style:none;padding:0;margin:4px 0 0}
+.megdel li{padding:3px 0}
+.megdel li.gjort{color:#888;text-decoration:line-through}
 .huske li.gruppe{cursor:default;font-size:12px;font-weight:bold;color:#6b5f00;text-transform:uppercase;padding-top:8px}
 </style>
 </head>
@@ -134,9 +144,14 @@ td:last-child{text-align:right;font-weight:bold}
 <div class="bunn">
     <div id="sist"></div>
     <div>Utviklet av Johanne Ulrica Øveraasen &copy; 2026</div>
+    <div id="versjon"></div>
 </div>
 
 <script>
+// Versjon av appen. Endres hver gang index.html endres, så det er lett å se om telefonen viser siste utgave.
+const APP_VERSJON = "20.11.2026 kl. 19.10";
+document.getElementById("versjon").textContent = "Versjon " + APP_VERSJON;
+
 // Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
 const MEDLEMMER = [
     { navn: "Per-Joar",   id: "3411086147", avd: "Søndre" },
@@ -513,7 +528,7 @@ const BESKJED_URL = "https://script.google.com/macros/s/AKfycbyD8od-cGRmBTuPGwmd
 let beskjeder = [];
 
 const harBeskjeder = () => !!BESKJED_URL;
-const skjemaApen = () => ["bTekst", "fSkjema", "lSkjema"].some(id => document.getElementById(id));
+const skjemaApen = () => ["bTekst", "fSkjema", "lSkjema", "iSkjema"].some(id => document.getElementById(id));
 
 const lappTid = iso => new Date(iso).toLocaleString("nb-NO", {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Oslo"
@@ -528,6 +543,7 @@ async function lastBeskjeder() {
             beskjeder = d.beskjeder;
             oppdaterForinger();
             oppdaterLaaste();
+            oppdaterInnst();
             tegnLapper();
             if (visning === visLogistikk && imp && !skjemaApen()) {   // faste føringer kan ha endret seg
                 const y = window.scrollY; visLogistikk(); window.scrollTo(0, y);
@@ -715,15 +731,96 @@ function lesLager(nokkel, std) {
 }
 function skrivLager(nokkel, v) { try { localStorage.setItem(nokkel, JSON.stringify(v)); } catch (e) {} }
 
-// Antall værer i hovedbyttet: tilSor = Nordre → Søndre, tilNord = Søndre → Nordre.
-// «auto» (standard) = appen regner ut antallet selv, se «Automatisk antall» i lagForslag.
+// ---------- Felles innstillinger ----------
+// «Sende fra seg», «Ende med» og antall i hovedbyttet er felles for alle. De lagres som én beskjed i
+// Google-regnearket (samme skript som de gule lappene), og den nyeste gjelder:
+//   «INNST|<Nordre→Søndre>|<Søndre→Nordre>|<medlem>:<sende fra seg>:<ende med>,...»
+//   a = automatisk, medlem = plassen i MEDLEMMER, tomt felt = ikke satt.
+// Endringer gjøres først som et utkast på denne enheten, og blir felles når de lagres med navn og kode.
+// tilSor = Nordre → Søndre, tilNord = Søndre → Nordre. «auto» = appen regner ut antallet selv (se lagForslag).
 const AUTO = "auto";
 const autoBytte = () => ({ tilSor: AUTO, tilNord: AUTO });
-let byttAntall = (() => {
-    const b = lesLager("vaerring_bytte2", null);
-    const ok = n => n === AUTO || (Number.isInteger(n) && n >= 0 && n <= MAKS_BYTTE);
-    return b && ok(b.tilSor) && ok(b.tilNord) ? b : autoBytte();
-})();
+const tomtKrav = () => Object.fromEntries(MEDLEMMER.map(m => [m.navn, { gi: null, mal: null }]));
+const tomInnst = () => ({ bytte: autoBytte(), krav: tomtKrav() });
+const INNST_PREFIKS = "INNST|";
+const erInnst = b => String(b.tekst || "").startsWith(INNST_PREFIKS);
+const kopi = o => JSON.parse(JSON.stringify(o));
+
+function pakkInnst(i) {
+    const tall = v => v === AUTO ? "a" : String(v);
+    const krav = MEDLEMMER.map((m, idx) => {
+        const k = i.krav[m.navn];
+        return k.gi === null && k.mal === null ? "" : `${idx}:${k.gi ?? ""}:${k.mal ?? ""}`;
+    }).filter(Boolean).join(",");
+    return `${INNST_PREFIKS}${tall(i.bytte.tilSor)}|${tall(i.bytte.tilNord)}|${krav}`;
+}
+function pakkUtInnst(tekst) {
+    const i = tomInnst();
+    const [, s, n, krav = ""] = String(tekst).split("|");
+    const tall = v => { if (v === "a") return AUTO; const x = parseInt(v, 10); return x >= 0 && x <= MAKS_BYTTE ? x : AUTO; };
+    i.bytte.tilSor = tall(s); i.bytte.tilNord = tall(n);
+    krav.split(",").filter(Boolean).forEach(e => {
+        const [idx, gi, mal] = e.split(":");
+        const m = MEDLEMMER[+idx];
+        if (!m) return;
+        if (/^\d+$/.test(gi || "") && +gi > 0) i.krav[m.navn].gi = +gi;
+        if (/^\d+$/.test(mal || "")) i.krav[m.navn].mal = +mal;
+    });
+    return i;
+}
+
+let felles = tomInnst();      // de lagrede, felles innstillingene
+let fellesInfo = null;        // { id, navn, tid } for den lagrede beskjeden
+let fellesIder = [];          // alle INNST-beskjeder (eldre ryddes bort ved lagring)
+let utkast = null;            // ulagrede endringer på denne enheten, eller null
+let byttAntall, medlemKrav;   // det som brukes i beregningen: utkastet hvis det finnes, ellers det felles
+function brukInnst() { const k = utkast || felles; byttAntall = k.bytte; medlemKrav = k.krav; }
+brukInnst();
+
+function oppdaterInnst() {
+    const liste = beskjeder.filter(erInnst).sort((a, b) => (new Date(b.tid) - new Date(a.tid)) || 0);
+    fellesIder = liste.map(b => b.id);
+    felles = liste.length ? pakkUtInnst(liste[0].tekst) : tomInnst();
+    fellesInfo = liste.length ? { id: liste[0].id, navn: liste[0].navn, tid: liste[0].tid } : null;
+    if (utkast && pakkInnst(utkast) === pakkInnst(felles)) utkast = null;
+    brukInnst();
+}
+const harUtkast = () => !!utkast && pakkInnst(utkast) !== pakkInnst(felles);
+function endreUtkast(endring) {
+    if (!utkast) utkast = kopi(felles);
+    endring(utkast);
+    if (!harUtkast()) utkast = null;
+    brukInnst();
+    visLogistikk();
+}
+function forkastUtkast() { utkast = null; brukInnst(); visLogistikk(); }
+
+let lagrerInnst = false;
+async function lagreInnst() {
+    if (lagrerInnst || !utkast) return;
+    const navn = document.getElementById("iNavn").value, kode = document.getElementById("iKode").value;
+    const feil = document.getElementById("iFeil"), knapp = document.getElementById("iSend");
+    if (!navn) { feil.textContent = "Velg navnet ditt."; return; }
+    if (kode.length < 4) { feil.textContent = "Skriv inn koden."; return; }
+
+    lagrerInnst = true; feil.textContent = ""; knapp.textContent = "Lagrer...";
+    const gamle = fellesIder.slice();
+    const d = await sendBeskjed({ handling: "ny", navn, kode, tekst: pakkInnst(utkast) });
+    if (d.ok) {
+        // Rydd bort eldre innstillinger. Lykkes ikke det, gjelder likevel den nyeste.
+        for (const id of gamle) await sendBeskjed({ handling: "slett", id, kode });
+        try { localStorage.setItem("vaerring_navn", navn); } catch (e) {}
+        felles = kopi(utkast); utkast = null; brukInnst();
+        lagrerInnst = false;
+        visLogistikk();
+        await lastBeskjeder();
+    } else {
+        lagrerInnst = false;
+        feil.textContent = d.feil || "Noe gikk galt.";
+        knapp.textContent = "Lagre for alle";
+    }
+}
+
 const harManueltBytte = () => byttAntall.tilSor !== AUTO || byttAntall.tilNord !== AUTO;
 
 // Faste føringer er felles for alle. De lagres som beskjeder i Google-regnearket (samme skript som de gule lappene)
@@ -739,37 +836,20 @@ function oppdaterForinger() {
     }).sort((a, b) => (new Date(a.tid) - new Date(b.tid)) || 0);
 }
 
-// Krav per medlem: { navn: { gi, mal } }, null = ikke satt
-const tomtKrav = () => Object.fromEntries(MEDLEMMER.map(m => [m.navn, { gi: null, mal: null }]));
-let medlemKrav = (() => {
-    const k = lesLager("vaerring_medlemskrav", {}) || {};
-    const ut = tomtKrav();
-    MEDLEMMER.forEach(m => {
-        const x = k[m.navn] || {};
-        if (Number.isInteger(x.gi) && x.gi > 0) ut[m.navn].gi = x.gi;
-        if (Number.isInteger(x.mal) && x.mal >= 0) ut[m.navn].mal = x.mal;
-    });
-    return ut;
-})();
+// Krav per medlem (medlemKrav): { navn: { gi, mal } }, null = ikke satt. Se «Felles innstillinger».
 const harKrav = () => MEDLEMMER.some(m => medlemKrav[m.navn].gi !== null || medlemKrav[m.navn].mal !== null);
 
 let visByttLikevel = false;
 let sisteForslag = null;
-// Er boksen «Antall værer per medlem» åpen? Den er alltid åpen når noe er satt i den.
+// Er boksen «Antall værer per medlem» åpen? Lukket som standard.
 let visKrav = false;
 
-function settBytt(retning, n) {
-    byttAntall[retning] = n === AUTO ? AUTO : +n;
-    skrivLager("vaerring_bytte2", byttAntall);
-    visLogistikk();
-}
+function settBytt(retning, n) { endreUtkast(u => { u.bytte[retning] = n === AUTO ? AUTO : +n; }); }
 function settByttLikevel(v) { visByttLikevel = v; visLogistikk(); }
 
 function settKrav(navn, felt, verdi) {
     if (!medlemKrav[navn]) return;
-    medlemKrav[navn][felt] = verdi === "" ? null : +verdi;
-    skrivLager("vaerring_medlemskrav", medlemKrav);
-    visLogistikk();
+    endreUtkast(u => { u.krav[navn][felt] = verdi === "" ? null : +verdi; });
 }
 
 // Skjema for ny fast føring (navn og kode som for beskjeder)
@@ -851,10 +931,8 @@ async function slettForing(id) {
 }
 
 function nullstillForutsetninger() {
-    if (!confirm("Fjerne alle krav per medlem og sette antall i byttet tilbake til automatisk? Prioriterte ønsker påvirkes ikke.")) return;
-    medlemKrav = tomtKrav(); skrivLager("vaerring_medlemskrav", medlemKrav);
-    byttAntall = autoBytte(); skrivLager("vaerring_bytte2", byttAntall);
-    visLogistikk();
+    if (!confirm("Fjerne alle krav per medlem og sette antall i byttet tilbake til automatisk? Prioriterte ønsker påvirkes ikke. Endringen gjelder for alle når du har lagret den.")) return;
+    endreUtkast(u => { u.bytte = autoBytte(); u.krav = tomtKrav(); });
 }
 
 const behov = m => imp.medlem[m.id].mangler;   // søyer som ennå ikke er paret
@@ -1182,7 +1260,7 @@ const LAAST_GRUPPER = [
     ["M", "For å nå ønsket antall", f => f.ekstra]
 ];
 const erLaast = b => String(b.tekst || "").startsWith(LAAST_PREFIKS);
-const erSystemBeskjed = b => erForing(b) || erLaast(b);
+const erSystemBeskjed = b => erForing(b) || erLaast(b) || erInnst(b);
 
 function pakkLaast(f) {
     const deler = LAAST_GRUPPER.map(([bokstav, , hent]) => {
@@ -1334,6 +1412,27 @@ function tegnLaaste() {
 }
 
 // ---------- Logistikk-siden ----------
+function lagreInnstHtml() {
+    let sist = "";
+    try { sist = localStorage.getItem("vaerring_navn") || ""; } catch (e) {}
+    if (!harBeskjeder()) return "";
+    return `
+    <div class="utkast" id="iSkjema">
+        <b>Endringene er ikke lagret</b>
+        <p class="notat">Forslaget under viser endringene dine, men de andre ser dem ikke før du lagrer.</p>
+        <div class="rad">
+            <select id="iNavn" aria-label="Lagret av">${medlemValgHtml(sist, "Velg navn")}</select>
+            <input id="iKode" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"
+                   placeholder="Kode" aria-label="Kode">
+        </div>
+        <div class="skjemafeil" id="iFeil"></div>
+        <div class="rad">
+            <div class="liten ok" id="iSend" onclick="lagreInnst()">Lagre for alle</div>
+            <div class="liten" onclick="forkastUtkast()">Forkast endringene</div>
+        </div>
+    </div>`;
+}
+
 function forutsetningerHtml(f) {
     const tallValg = (fra, til, valgt, tom) => (tom !== undefined ? `<option value="">${tom}</option>` : "") +
         Array.from({ length: til - fra + 1 }, (_, i) => fra + i).map(n =>
@@ -1381,10 +1480,11 @@ function forutsetningerHtml(f) {
     <div class="skjema">
         <b>Forutsetninger</b>
         <p class="notat">Det du setter her overstyrer de automatiske beregningene, og forslagene under regnes ut på nytt med en gang.
-            <b>Prioriterte ønsker og låste huskelapper er felles og synlige for alle.</b>
-            De andre valgene huskes bare på denne enheten.</p>
+            <b>Alt her er felles og synlig for alle.</b> Endringer i antall per medlem og i hovedbyttet må lagres
+            med navn og kode før de gjelder for de andre.
+            ${fellesInfo ? `Sist lagret av ${esc(fellesInfo.navn)}, ${esc(lappTid(fellesInfo.tid))}.` : ""}</p>
 
-        <details class="utvid"${visKrav || harKrav() ? " open" : ""} ontoggle="visKrav = this.open">
+        <details class="utvid"${visKrav ? " open" : ""} ontoggle="visKrav = this.open">
             <summary>Antall værer per medlem – kun aktuelt dersom antallet ikke skal byttes «likt»${harKrav() ? ' <span class="obs">I bruk</span>' : ""}</summary>
             <p class="notat">«Sende fra seg»: så mange værer skal sendes herfra, selv om de ikke er ferdige.
                 «Ende med»: så mange værer skal medlemmet ha etterpå. «Etter» viser resultatet av forslaget.
@@ -1404,6 +1504,7 @@ function forutsetningerHtml(f) {
         </div>
         ${autoTekst}
         <p class="notat" style="margin-top:0">Alle flyttinger mellom avdelingene teller med, også prioriterte ønsker og «sende fra seg».</p>
+        ${harUtkast() ? lagreInnstHtml() : ""}
 
         <label id="foringer">Prioriterte ønsker for neste flytting (faste føringer)</label>
         <p class="notat" style="margin-top:0">Her legger hvert medlem inn værer de ønsker flyttet ved neste flytting.
@@ -1421,6 +1522,48 @@ function kontrollHtml(f) {
     <div class="kontroll ${ok ? "ok" : "avvik"}">
         <b>${ok ? "✓ Alle forutsetningene er oppfylt" : "⚠ Ikke alle forutsetningene kunne oppfylles"}</b>
         <ul>${f.kontroll.map(k => `<li>${k.ok ? "✓" : "⚠"} ${esc(k.tekst)}</li>`).join("")}</ul>
+    </div>`;
+}
+
+// «Hva skal jeg gjøre?»: det valgte medlemmets egne flyttinger. Bygger på den nyeste låste planen
+// (huskelappen) hvis det finnes en, ellers på forslaget slik det er nå.
+// Navnet velges hver gang appen åpnes (huskes ikke), siden noen kan kjøre for andre.
+let megSelv = "";
+function settMegSelv(navn) { megSelv = navn; visLogistikk(); }
+
+function minOversiktHtml(f) {
+    const plan = laaste[0];
+    const linjer = plan
+        ? pakkUtLaast(plan.tekst)
+        : [...f.faste, ...f.maaGi, ...f.intern["Søndre"], ...f.intern["Nordre"], ...f.bytte.tilSor, ...f.bytte.tilNord, ...f.ekstra]
+            .map(x => ({ nr: x.nr, navn: x.navn, fra: x.fra.navn, til: x.til.navn }));
+    const kilde = plan
+        ? `Ut fra den låste planen (låst av ${esc(plan.navn)}, ${esc(lappTid(plan.tid))}).`
+        : "Ut fra forslaget slik det er nå. Ingen plan er låst ennå.";
+    const velg = `<select aria-label="Vis for medlem" onchange="settMegSelv(this.value)">${medlemValgHtml(megSelv, "Velg medlem")}</select>`;
+    const m = medlemNavn(megSelv);
+    if (!m) return `
+    <div class="meg">
+        <div class="megtopp"><b>Hva skal jeg gjøre?</b>${velg}</div>
+        <p class="notat">Velg hvem du kjører for, så ser du hvilke værer som skal sendes og hentes.</p>
+    </div>`;
+
+    const hosNa = nr => (vaerData.find(v => v["Kåringsnr"] === nr) || {})["Hos"];
+    const gjort = x => hosNa(x.nr) === x.til;
+    const sende = linjer.filter(x => x.fra === m.navn), faa = linjer.filter(x => x.til === m.navn);
+    const har = vaerData.filter(v => imp.vaerer[v["Kåringsnr"]] && v["Hos"] === m.navn).length;
+    const etter = har - sende.filter(x => !gjort(x)).length + faa.filter(x => !gjort(x)).length;
+    const rad = (x, tekst) => `<li class="${gjort(x) ? "gjort" : ""}">${gjort(x) ? "✓ " : ""}${stjerne(x.nr)}<b>${esc(x.navn)}</b> ${tekst}</li>`;
+
+    return `
+    <div class="meg">
+        <div class="megtopp"><b>Hva skal jeg gjøre?</b>${velg}</div>
+        <p class="notat">${kilde}</p>
+        <div class="megdel"><span class="megtittel">Sende</span>
+            ${sende.length ? `<ul>${sende.map(x => rad(x, `→ ${esc(x.til)}`)).join("")}</ul>` : '<p class="notat">Ingenting å sende.</p>'}</div>
+        <div class="megdel"><span class="megtittel">Hente / få</span>
+            ${faa.length ? `<ul>${faa.map(x => rad(x, `fra ${esc(x.fra)}`)).join("")}</ul>` : '<p class="notat">Ingenting å få.</p>'}</div>
+        <div class="megdel"><span class="megtittel">Værer</span> ${har} → ${etter}</div>
     </div>`;
 }
 
@@ -1468,6 +1611,7 @@ function visLogistikk() {
     <div class="tilbake" onclick="visForside()">← Tilbake</div>
     ${advarsler.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     <h2>Logistikk</h2>
+    ${minOversiktHtml(f)}
     <div class="tips">
         <b>Har du et bestemt ønske til neste flytting?</b>
         Legg det inn som et prioritert ønske (fast føring) under «Forutsetninger». Alle kan se det, og det går foran
