@@ -92,6 +92,21 @@ td:last-child{text-align:right;font-weight:bold}
 .huske{list-style:none;padding:0;margin:6px 0 0}
 .huske li{padding:4px 0;cursor:pointer}
 .huske li.gjort{text-decoration:line-through;color:#8a7d1a}
+.tips{background:#fff3b0;border:2px solid #e0a800;border-radius:10px;padding:14px 16px;margin:10px 0 16px;font-size:16px;line-height:1.45}
+.tips b{display:block;font-size:18px;margin-bottom:4px}
+.tips a{display:inline-block;margin-top:8px;font-weight:bold;color:#7a4b00}
+.krav{font-size:14px;margin:4px 0 12px}
+.krav th{text-align:left;font-size:12px;color:#666;padding:4px;font-weight:bold}
+.krav td{padding:4px;font-weight:normal;text-align:left}
+.krav td:last-child{font-weight:bold}
+.krav .midt{text-align:center}
+.krav .avvik{color:#c62828}
+.krav .avdrad td{font-size:12px;font-weight:bold;color:#888;text-transform:uppercase;padding-top:10px;border-bottom:none}
+.skjema .krav select{margin:0;padding:6px 4px;font-size:15px}
+.kontroll{border-radius:10px;padding:12px 14px;margin:14px 0}
+.kontroll.ok{background:#e3f4e8;border:1px solid #2e9e4f}
+.kontroll.avvik{background:#fde8e8;border:1px solid #c62828}
+.kontroll ul{margin:6px 0 0;padding-left:4px;list-style:none;font-size:14px;line-height:1.5}
 .huske li.gruppe{cursor:default;font-size:12px;font-weight:bold;color:#6b5f00;text-transform:uppercase;padding-top:8px}
 </style>
 </head>
@@ -651,22 +666,30 @@ async function installer() {
 // ---------- Logistikk ----------
 // Antakelse: «Hos» i appdata.csv er hvor væren står nå. Flytter du en vær, endrer du «Hos».
 //
-// 0) Forutsetninger (settes øverst på Logistikk-siden og huskes på denne enheten):
-//    - Inntil MAKS_FORINGER faste føringer: «denne væren skal fra A til B». De legges inn først og
-//      overstyrer beregningen. Værene i en føring tas ikke med i resten av beregningen.
+// Forutsetninger (settes øverst på Logistikk-siden og huskes på denne enheten) overstyrer beregningen:
+//    - Faste føringer (inntil MAKS_FORINGER): «denne væren skal fra A til B».
+//    - Per medlem: «må gi fra seg» x værer (også værer som ikke er ferdige), og/eller «skal ende med» x værer.
 //    - Antall værer hver vei i hovedbyttet, valgt hver for seg (f.eks. 4 sørover og 6 nordover).
-//      En fast føring mellom avdelingene teller med i antallet for sin retning.
-// 1) Innad i hver avdeling: En vær som er ferdig hos den som har den, foreslås flyttet til et medlem
-//    i samme avdeling som har mer igjen av kvoten. Av dem velges den som har flest søyer igjen å pare
-//    per vær som allerede står der, slik at de som trenger flest værer får flest.
-// 2) Bytte mellom Nordre og Søndre: Foreslås bare når minst BYTTE_VAERER værer er ferdige hos minst
-//    BYTTE_MEDLEMMER medlemmer (eller når du ber om det). De som er mest ferdige i egen avdeling og
-//    har mest igjen i den andre prioriteres, og stjerneværene holdes jevnt fordelt.
-// Værer med aktivt hvile-merke (Obs i appdata.csv) foreslås ikke flyttet, med mindre de står i en fast føring.
-// 3) Forslaget kan låses. Da legges det som en gul huskelapp nederst på Logistikk-siden (lagres på denne enheten).
+// Rekkefølgen i beregningen:
+//    0) Faste føringer.
+//    A) Medlemmer som må gi fra seg værer (eller har flere enn de skal ende med): de værene som har minst
+//       igjen hos medlemmet flyttes, helst innad i avdelingen.
+//    1) Innad i hver avdeling: en vær som er ferdig hos den som har den, flyttes til et medlem i samme avdeling
+//       som har mer igjen av kvoten. De som har flest søyer igjen å pare per vær de har, får flest.
+//    2) Bytte mellom Nordre og Søndre: foreslås når minst BYTTE_VAERER værer er ferdige hos minst
+//       BYTTE_MEDLEMMER medlemmer (eller når du ber om det). Flyttinger mellom avdelingene fra trinnene over
+//       teller med i antallet. Stjerneværene holdes jevnt fordelt.
+//    B) Medlemmer som fortsatt har færre enn de skal ende med, får værer fra andre (helst i samme avdeling,
+//       helst værer som er ferdige der de står). Ingen tas under sitt eget mål, og ingen uten mål tømmes helt.
+// Et medlem med «skal ende med» tar ikke imot flere værer enn målet.
+// Værer med aktivt hvile-merke (Obs i appdata.csv) flyttes ikke, med mindre de står i en fast føring.
+// De telles likevel med i antallet værer hvert medlem har.
+// Til slutt kontrolleres det om forutsetningene faktisk ble oppfylt.
+// Forslaget kan låses som en gul huskelapp nederst på Logistikk-siden (lagres på denne enheten).
 const ANTALL_BYTTE = 4;        // standard antall værer hver vei i et bytte
 const MAKS_BYTTE = 8;          // høyeste antall som kan velges per retning
 const MAKS_FORINGER = 6;       // antall faste føringer
+const MAKS_MAL = 12;           // høyeste «skal ende med» som kan velges
 const MAKS_LAASTE = 5;         // antall låste lapper som tas vare på
 const BYTTE_MEDLEMMER = 4;     // «ferdig hos de fleste medlemmene»: minst 4 av 6
 const BYTTE_VAERER = 4;        // «flere av værene»: minst 4 værer
@@ -694,6 +717,20 @@ let foringer = (() => {
     return Array.isArray(f) ? f.slice(0, MAKS_FORINGER).map(x => ({ nr: x.nr || "", fra: x.fra || "", til: x.til || "" })) : [];
 })();
 
+// Krav per medlem: { navn: { gi, mal } }, null = ikke satt
+const tomtKrav = () => Object.fromEntries(MEDLEMMER.map(m => [m.navn, { gi: null, mal: null }]));
+let medlemKrav = (() => {
+    const k = lesLager("vaerring_medlemskrav", {}) || {};
+    const ut = tomtKrav();
+    MEDLEMMER.forEach(m => {
+        const x = k[m.navn] || {};
+        if (Number.isInteger(x.gi) && x.gi > 0) ut[m.navn].gi = x.gi;
+        if (Number.isInteger(x.mal) && x.mal >= 0) ut[m.navn].mal = x.mal;
+    });
+    return ut;
+})();
+const harKrav = () => MEDLEMMER.some(m => medlemKrav[m.navn].gi !== null || medlemKrav[m.navn].mal !== null);
+
 let laaste = (() => { const l = lesLager("vaerring_laaste", []); return Array.isArray(l) ? l : []; })();
 let visByttLikevel = false;
 let sisteForslag = null;
@@ -704,6 +741,13 @@ function settBytt(retning, n) {
     visLogistikk();
 }
 function settByttLikevel(v) { visByttLikevel = v; visLogistikk(); }
+
+function settKrav(navn, felt, verdi) {
+    if (!medlemKrav[navn]) return;
+    medlemKrav[navn][felt] = verdi === "" ? null : +verdi;
+    skrivLager("vaerring_medlemskrav", medlemKrav);
+    visLogistikk();
+}
 
 const lagreForinger = () => skrivLager("vaerring_foringer", foringer);
 function leggTilForing() {
@@ -724,8 +768,9 @@ function endreForing(i, felt, verdi) {
 }
 function fjernForing(i) { foringer.splice(i, 1); lagreForinger(); visLogistikk(); }
 function nullstillForutsetninger() {
-    if (!confirm("Fjerne alle føringer og sette antall i byttet tilbake til " + ANTALL_BYTTE + " hver vei?")) return;
+    if (!confirm("Fjerne alle føringer og krav, og sette antall i byttet tilbake til " + ANTALL_BYTTE + " hver vei?")) return;
     foringer = []; lagreForinger();
+    medlemKrav = tomtKrav(); skrivLager("vaerring_medlemskrav", medlemKrav);
     byttAntall = { tilSor: ANTALL_BYTTE, tilNord: ANTALL_BYTTE }; skrivLager("vaerring_bytte", byttAntall);
     visLogistikk();
 }
@@ -764,86 +809,119 @@ function lagForslag(medBytte) {
         .filter(v => imp.vaerer[v["Kåringsnr"]] && holder(v))
         .map(v => ({ nr: v["Kåringsnr"], navn: v["Vær"], fra: holder(v) }));
 
-    const inn = {}, aktive = {};
-    MEDLEMMER.forEach(m => { inn[m.id] = 0; aktive[m.id] = aktiveHos(m); });
-    const poeng = m => behov(m) / (aktive[m.id] + inn[m.id] + 1);
-    const mottaker = (liste, v) => liste
-        .filter(m => m.id !== v.fra.id && igjenHos(m, v.nr) > 0)
-        .sort((a, b) => poeng(b) - poeng(a) || igjenHos(b, v.nr) - igjenHos(a, v.nr))[0]
-        // Ingen har noe igjen på væren: den som trenger flest værer får den
-        || liste.filter(m => m.id !== v.fra.id).sort((a, b) => poeng(b) - poeng(a))[0];
-
     const res = {
-        faste: [], foringsfeil: [],
+        faste: [], foringsfeil: [], maaGi: [], ekstra: [],
         intern: { "Søndre": [], "Nordre": [] },
-        bytte: { tilSor: [], tilNord: [], onsketSor: 0, onsketNord: 0, fastSor: 0, fastNord: 0 },
-        stjerner: null, ferdigOveralt: [], utenForslag: 0, hviler: []
+        bytte: { tilSor: [], tilNord: [], onsketSor: byttAntall.tilSor, onsketNord: byttAntall.tilNord },
+        stjerner: null, ferdigOveralt: [], utenForslag: 0, hviler: [],
+        har: {}, etter: {}, kontroll: []
     };
     const flyttet = new Set();
 
-    // 0) Faste føringer
+    // 0a) Kontroller de faste føringene. «Fra» i en føring overstyrer hvor væren står.
+    const gyldige = [], brukt = new Set();
     foringer.forEach((f, i) => {
         if (!f.nr || !f.til) return;   // ikke ferdig utfylt ennå
         const v = vaerer.find(x => x.nr === f.nr);
         const fra = medlemNavn(f.fra) || (v && v.fra);
         const til = medlemNavn(f.til);
         if (!v) { res.foringsfeil.push(`Føring ${i + 1}: Fant ikke væren ${f.nr}.`); return; }
-        if (flyttet.has(v.nr)) { res.foringsfeil.push(`Føring ${i + 1}: ${v.navn} står i en føring fra før. Bare den første brukes.`); return; }
+        if (brukt.has(v.nr)) { res.foringsfeil.push(`Føring ${i + 1}: ${v.navn} står i en føring fra før. Bare den første brukes.`); return; }
         if (!til || !fra) { res.foringsfeil.push(`Føring ${i + 1}: Ukjent medlem.`); return; }
         if (fra.id === til.id) { res.foringsfeil.push(`Føring ${i + 1}: ${v.navn} har samme medlem som fra og til.`); return; }
         v.fra = fra;
-        inn[til.id]++;
-        flyttet.add(v.nr);
-        res.faste.push({ ...v, til, fast: true });
+        brukt.add(v.nr);
+        gyldige.push({ v, til });
     });
 
-    // Stjerner per avdeling: [Nordre, Søndre], før og etter alle flyttinger
-    const stjerneI = (avd, liste) => liste.filter(v => erStjerne(v.nr) && v.fra.avd === avd).length;
-    const foer = [stjerneI("Nordre", vaerer), stjerneI("Søndre", vaerer)];
-    const flyttStjerner = (fra, liste) => {
-        const ut = fra.slice();
-        liste.filter(x => erStjerne(x.nr) && x.fra.avd !== x.til.avd).forEach(x => {
-            if (x.til.avd === "Nordre") { ut[0]++; ut[1]--; } else { ut[0]--; ut[1]++; }
-        });
-        return ut;
+    // Antall værer per medlem nå (hvilende værer telles med), og hvor mange de får inn og gir fra seg
+    const har = {}, inn = {}, ut = {}, aktive = {};
+    MEDLEMMER.forEach(m => {
+        har[m.id] = vaerer.filter(v => v.fra.id === m.id).length;
+        inn[m.id] = 0; ut[m.id] = 0; aktive[m.id] = aktiveHos(m);
+    });
+    const antallEtter = m => har[m.id] - ut[m.id] + inn[m.id];
+    const mal = m => medlemKrav[m.navn].mal;
+    const underMal = m => mal(m) === null ? 0 : Math.max(0, mal(m) - antallEtter(m));
+    const kanTa = m => mal(m) === null || antallEtter(m) < mal(m);
+    const poeng = m => behov(m) / (aktive[m.id] + inn[m.id] + 1);
+    const mottaker = (liste, v) => {
+        const mulige = liste.filter(m => m.id !== v.fra.id && kanTa(m));
+        const sorter = (a, b) => underMal(b) - underMal(a) || poeng(b) - poeng(a) || igjenHos(b, v.nr) - igjenHos(a, v.nr);
+        // Helst en som har noe igjen å pare med væren; ellers den som trenger flest værer
+        return mulige.filter(m => igjenHos(m, v.nr) > 0).sort(sorter)[0] || mulige.sort(sorter)[0];
     };
-    const etterFaste = flyttStjerner(foer, res.faste);
-    res.stjerner = { foer, etter: etterFaste };
+    const flytt = (v, til, liste, merke) => {
+        inn[til.id]++; ut[v.fra.id]++; flyttet.add(v.nr);
+        liste.push({ ...v, til, merke });
+    };
 
-    // Værer med hvile-merke (Obs) foreslås ikke flyttet. En fast føring overstyrer dette.
-    const hviler = new Set(vaerer.filter(v => !flyttet.has(v.nr) && obsAktiv(vaerData.find(x => x["Kåringsnr"] === v.nr))).map(v => v.nr));
+    // 0b) Faste føringer
+    gyldige.forEach(({ v, til }) => flytt(v, til, res.faste, "Fast"));
+
+    // Værer med hvile-merke foreslås ikke flyttet
+    const hviler = new Set(vaerer.filter(v => !flyttet.has(v.nr) &&
+        obsAktiv(vaerData.find(x => x["Kåringsnr"] === v.nr))).map(v => v.nr));
     res.hviler = vaerer.filter(v => hviler.has(v.nr));
+    const ledig = v => !flyttet.has(v.nr) && !hviler.has(v.nr);
+
+    // A) Medlemmer som må gi fra seg værer (krav «gi fra seg», eller flere enn «skal ende med»)
+    const maaGiAntall = m => {
+        const k = medlemKrav[m.navn];
+        return Math.max(k.gi || 0, k.mal !== null ? har[m.id] - k.mal : 0);
+    };
+    for (const m of MEDLEMMER) {
+        let trengs = maaGiAntall(m) - ut[m.id];
+        if (trengs <= 0) continue;
+        const kandidater = vaerer.filter(v => v.fra.id === m.id && ledig(v))
+            .sort((a, b) => igjenHos(m, a.nr) - igjenHos(m, b.nr));   // minst igjen hos m først
+        for (const v of kandidater) {
+            if (trengs <= 0) break;
+            const til = mottaker(MEDLEMMER.filter(x => x.avd === m.avd), v)
+                     || mottaker(MEDLEMMER.filter(x => x.avd !== m.avd), v);
+            if (!til) break;
+            flytt(v, til, res.maaGi, "Må gi");
+            trengs--;
+        }
+    }
 
     // 1) Innad i avdelingene
     for (const v of vaerer) {
-        if (flyttet.has(v.nr) || hviler.has(v.nr) || !erFerdig(v.fra, v.nr)) continue;
+        if (!ledig(v) || !erFerdig(v.fra, v.nr)) continue;
         const til = mottaker(MEDLEMMER.filter(m => m.avd === v.fra.avd), v);
-        if (!til) continue;
-        inn[til.id]++;
-        flyttet.add(v.nr);
-        res.intern[v.fra.avd].push({ ...v, til });
+        if (til) flytt(v, til, res.intern[v.fra.avd]);
     }
+
+    // Stjerner per avdeling: [Nordre, Søndre], før og etter alle flyttinger
+    const stjerneI = avd => vaerer.filter(v => erStjerne(v.nr) && v.fra.avd === avd).length;
+    const foer = [stjerneI("Nordre"), stjerneI("Søndre")];
+    const flyttStjerner = (fra, liste) => {
+        const s = fra.slice();
+        liste.filter(x => erStjerne(x.nr) && x.fra.avd !== x.til.avd).forEach(x => {
+            if (x.til.avd === "Nordre") { s[0]++; s[1]--; } else { s[0]--; s[1]++; }
+        });
+        return s;
+    };
+    const alleFlytt = () => [...res.faste, ...res.maaGi, ...res.intern["Søndre"], ...res.intern["Nordre"],
+        ...res.bytte.tilSor, ...res.bytte.tilNord, ...res.ekstra];
+    const kryss = (fraAvd, tilAvd) => alleFlytt().filter(x => x.fra.avd === fraAvd && x.til.avd === tilAvd).length;
 
     // 2) Bytte mellom Nordre og Søndre
     const b = res.bytte;
-    b.onsketSor = byttAntall.tilSor; b.onsketNord = byttAntall.tilNord;
-    b.fastSor = res.faste.filter(x => x.fra.avd === "Nordre" && x.til.avd === "Søndre").length;
-    b.fastNord = res.faste.filter(x => x.fra.avd === "Søndre" && x.til.avd === "Nordre").length;
-
     if (medBytte) {
         const kandidater = avd => vaerer
-            .filter(v => v.fra.avd === avd && !flyttet.has(v.nr) && !hviler.has(v.nr))
+            .filter(v => v.fra.avd === avd && ledig(v))
             .map(v => ({ ...v, poeng: restI(andreAvd(avd), v.nr) - restI(avd, v.nr), annet: restI(andreAvd(avd), v.nr) }))
             .filter(v => v.annet > 0)   // må ha noe igjen å gjøre i den andre avdelingen
             .sort((a, b) => b.poeng - a.poeng)
             .slice(0, 10);
 
         const nord = kandidater("Nordre"), sor = kandidater("Søndre");
-        const kSor = Math.min(Math.max(0, b.onsketSor - b.fastSor), nord.length);    // Nordre → Søndre
-        const kNord = Math.min(Math.max(0, b.onsketNord - b.fastNord), sor.length);  // Søndre → Nordre
+        const kSor = Math.min(Math.max(0, b.onsketSor - kryss("Nordre", "Søndre")), nord.length);    // Nordre → Søndre
+        const kNord = Math.min(Math.max(0, b.onsketNord - kryss("Søndre", "Nordre")), sor.length);  // Søndre → Nordre
 
         if (kSor + kNord > 0) {
-            const [baseN, baseS] = etterFaste;
+            const [baseN, baseS] = flyttStjerner(foer, alleFlytt());
             let beste = null;
             for (const n of kombinasjoner(nord, kSor)) {
                 const sn = n.filter(v => erStjerne(v.nr)).length;
@@ -859,22 +937,94 @@ function lagForslag(medBytte) {
                     if (!beste || bedre(nokkel, beste.nokkel)) beste = { n, so, nokkel };
                 }
             }
-            const tildel = (liste, tilAvd) => liste.map(v => {
+            const tildel = (liste, tilAvd, ut) => liste.forEach(v => {
                 const til = mottaker(MEDLEMMER.filter(m => m.avd === tilAvd), v);
-                inn[til.id]++;
-                return { ...v, til };
+                if (til) flytt(v, til, ut);   // ingen plass (alle har nådd målet sitt): væren blir stående
             });
-            b.tilSor = tildel(beste.n, "Søndre");
-            b.tilNord = tildel(beste.so, "Nordre");
-            beste.n.concat(beste.so).forEach(v => flyttet.add(v.nr));
-            res.stjerner.etter = flyttStjerner(etterFaste, b.tilSor.concat(b.tilNord));
+            tildel(beste.n, "Søndre", b.tilSor);
+            tildel(beste.so, "Nordre", b.tilNord);
         }
     }
 
+    // B) Fyll opp medlemmer som har færre enn de skal ende med
+    const kanAvgi = d => mal(d) === null ? antallEtter(d) > 1 : antallEtter(d) > mal(d);
+    for (let runde = 0; runde < 40; runde++) {
+        const m = MEDLEMMER.filter(x => underMal(x) > 0).sort((a, c) => underMal(c) - underMal(a))[0];
+        if (!m) break;
+        const [sN, sS] = flyttStjerner(foer, alleFlytt());
+        // 1 hvis flyttingen gjør stjernefordelingen skjevere enn én i forskjell
+        const stjerneStraff = v => {
+            if (!erStjerne(v.nr) || v.fra.avd === m.avd) return 0;
+            const n = m.avd === "Nordre" ? sN + 1 : sN - 1, s = m.avd === "Nordre" ? sS - 1 : sS + 1;
+            return Math.abs(n - s) > 1 ? 1 : 0;
+        };
+        const kilde = vaerer
+            .filter(v => ledig(v) && v.fra.id !== m.id && kanAvgi(v.fra))
+            .sort((a, c) =>
+                (a.fra.avd === m.avd ? 0 : 1) - (c.fra.avd === m.avd ? 0 : 1) ||   // helst samme avdeling
+                stjerneStraff(a) - stjerneStraff(c) ||                             // hold stjernene jevnt fordelt
+                Number(erFerdig(c.fra, c.nr)) - Number(erFerdig(a.fra, a.nr)) ||   // helst ferdig der den står
+                igjenHos(m, c.nr) - igjenHos(m, a.nr) ||                           // mest igjen hos mottakeren
+                antallEtter(c.fra) - antallEtter(a.fra))[0];                       // fra den som har flest
+        if (!kilde) break;
+        flytt(kilde, m, res.ekstra, "Mål");
+    }
+
     for (const v of vaerer) {
-        if (flyttet.has(v.nr) || hviler.has(v.nr)) continue;
+        if (!ledig(v)) continue;
         if (erFerdig(v.fra, v.nr) && restI("Nordre", v.nr) + restI("Søndre", v.nr) === 0) res.ferdigOveralt.push(v);
         else res.utenForslag++;
+    }
+
+    res.stjerner = { foer, etter: flyttStjerner(foer, alleFlytt()) };
+    MEDLEMMER.forEach(m => { res.har[m.navn] = har[m.id]; res.etter[m.navn] = antallEtter(m); });
+
+    // ---------- Kontroll: ble forutsetningene oppfylt? ----------
+    const K = res.kontroll;
+    const fylteForinger = foringer.filter(f => f.nr && f.til).length;
+    if (fylteForinger) K.push({ ok: res.faste.length === fylteForinger,
+        tekst: `Faste føringer: ${res.faste.length} av ${fylteForinger} lagt inn.` });
+
+    MEDLEMMER.forEach(m => {
+        const k = medlemKrav[m.navn];
+        if (k.gi !== null) {
+            const ok = ut[m.id] >= k.gi;
+            const hvil = vaerer.filter(v => v.fra.id === m.id && hviler.has(v.nr)).length;
+            K.push({ ok, tekst: `${m.navn} gir fra seg ${ut[m.id]} værer (krav: ${k.gi}).` +
+                (ok ? "" : hvil ? ` ${hvil} av værene ${m.navn} har, hviler.` : " Fant ingen som kan ta imot flere.") });
+        }
+        if (k.mal !== null) {
+            const n = antallEtter(m), ok = n === k.mal;
+            K.push({ ok, tekst: `${m.navn} ender med ${n} værer (ønsket: ${k.mal}).` +
+                (ok ? "" : n < k.mal ? " Fant ikke flere værer som kan flyttes hit uten å tømme andre."
+                                     : " Noen av værene kan ikke flyttes (hviler eller fast føring).") });
+        }
+    });
+
+    if (medBytte) {
+        const sjekk = (fraAvd, tilAvd, onsket, retning) => {
+            const n = kryss(fraAvd, tilAvd);
+            let tekst = `${retning}: ${n} foreslått (ønsket: ${onsket}).`;
+            if (n < onsket) {
+                const iAvd = vaerer.filter(v => v.fra.avd === fraAvd);
+                const deler = [];
+                const hvil = iAvd.filter(v => hviler.has(v.nr)).length;
+                const andre = iAvd.filter(v => flyttet.has(v.nr) && kryssEn(v) === false).length;
+                const ingenRest = iAvd.filter(v => ledig(v) && restI(tilAvd, v.nr) === 0).length;
+                if (hvil) deler.push(`${hvil} hviler`);
+                if (andre) deler.push(`${andre} flyttes allerede innad`);
+                if (ingenRest) deler.push(`${ingenRest} har ingen igjen å pare i ${tilAvd}`);
+                tekst += ` ${fraAvd} har ${iAvd.length} værer${deler.length ? ": " + deler.join(", ") : ""}.`;
+                const fulle = MEDLEMMER.filter(m => m.avd === tilAvd && !kanTa(m)).map(m => m.navn);
+                if (fulle.length) tekst += ` ${fulle.join(" og ")} har nådd «Ende med» og tar ikke imot flere.`;
+            } else if (n > onsket) tekst += " Flere enn ønsket på grunn av andre forutsetninger.";
+            K.push({ ok: n >= onsket, tekst });
+        };
+        // Er væren flyttet mellom avdelingene? (false = flyttet innad)
+        const flyttMap = new Map(alleFlytt().map(x => [x.nr, x]));
+        const kryssEn = v => { const x = flyttMap.get(v.nr); return x ? x.fra.avd !== x.til.avd : null; };
+        sjekk("Nordre", "Søndre", b.onsketSor, "Nordre → Søndre");
+        sjekk("Søndre", "Nordre", b.onsketNord, "Søndre → Nordre");
     }
     return res;
 }
@@ -885,10 +1035,12 @@ function laasForslag() {
     if (!f) return;
     const grupper = [
         ["Faste føringer", f.faste],
+        ["Må gi fra seg", f.maaGi],
         ["Innad i Søndre", f.intern["Søndre"]],
         ["Innad i Nordre", f.intern["Nordre"]],
         ["Nordre → Søndre", f.bytte.tilSor],
-        ["Søndre → Nordre", f.bytte.tilNord]
+        ["Søndre → Nordre", f.bytte.tilNord],
+        ["For å nå ønsket antall", f.ekstra]
     ];
     const linjer = [];
     grupper.forEach(([gruppe, liste]) => liste.forEach(x =>
@@ -945,7 +1097,7 @@ function tegnLaaste() {
 }
 
 // ---------- Logistikk-siden ----------
-function forutsetningerHtml() {
+function forutsetningerHtml(f) {
     const vaerValg = vaerData
         .filter(v => imp.vaerer[v["Kåringsnr"]])
         .slice().sort((a, b) => a["Vær"].localeCompare(b["Vær"], "no"));
@@ -954,40 +1106,79 @@ function forutsetningerHtml() {
     const medlemValg = valgt => `<option value="">Velg</option>` + AVDELINGER.map(a =>
         `<optgroup label="${a}">${MEDLEMMER.filter(m => m.avd === a).map(m =>
             `<option value="${esc(m.navn)}"${m.navn === valgt ? " selected" : ""}>${esc(m.navn)}</option>`).join("")}</optgroup>`).join("");
-    const tall = valgt => Array.from({ length: MAKS_BYTTE + 1 }, (_, n) =>
-        `<option value="${n}"${n === valgt ? " selected" : ""}>${n}</option>`).join("");
+    const tallValg = (fra, til, valgt, tom) => (tom !== undefined ? `<option value="">${tom}</option>` : "") +
+        Array.from({ length: til - fra + 1 }, (_, i) => fra + i).map(n =>
+            `<option value="${n}"${n === valgt ? " selected" : ""}>${n}</option>`).join("");
 
-    const rader = foringer.map((f, i) => `
+    const rader = foringer.map((fo, i) => `
         <div class="foring">
             <div class="foringtopp"><b>Føring ${i + 1}</b><span class="slett" onclick="fjernForing(${i})">✕ Fjern</span></div>
             <select aria-label="Vær" onchange="endreForing(${i}, 'nr', this.value)">${
-                valg(vaerValg.map(v => [v["Kåringsnr"], (erStjerne(v["Kåringsnr"]) ? "★ " : "") + v["Vær"]]), f.nr, "Velg vær")}</select>
+                valg(vaerValg.map(v => [v["Kåringsnr"], (erStjerne(v["Kåringsnr"]) ? "★ " : "") + v["Vær"]]), fo.nr, "Velg vær")}</select>
             <div class="fratil">
-                <select aria-label="Fra" onchange="endreForing(${i}, 'fra', this.value)">${medlemValg(f.fra)}</select>
+                <select aria-label="Fra" onchange="endreForing(${i}, 'fra', this.value)">${medlemValg(fo.fra)}</select>
                 <span class="pil">→</span>
-                <select aria-label="Til" onchange="endreForing(${i}, 'til', this.value)">${medlemValg(f.til)}</select>
+                <select aria-label="Til" onchange="endreForing(${i}, 'til', this.value)">${medlemValg(fo.til)}</select>
             </div>
         </div>`).join("");
+
+    const kravRader = AVDELINGER.map(a => `
+        <tr class="avdrad"><td colspan="5">${a}</td></tr>` + MEDLEMMER.filter(m => m.avd === a).map(m => {
+            const k = medlemKrav[m.navn], har = f.har[m.navn] || 0, etter = f.etter[m.navn];
+            const avvik = k.mal !== null && etter !== k.mal;
+            return `<tr>
+                <td>${esc(m.navn)}</td>
+                <td class="midt">${har}</td>
+                <td><select aria-label="${esc(m.navn)} gir fra seg" onchange="settKrav('${esc(m.navn)}', 'gi', this.value)">${
+                    tallValg(1, Math.max(1, har), k.gi, "–")}</select></td>
+                <td><select aria-label="${esc(m.navn)} skal ende med" onchange="settKrav('${esc(m.navn)}', 'mal', this.value)">${
+                    tallValg(0, MAKS_MAL, k.mal, "–")}</select></td>
+                <td class="midt${avvik ? " avvik" : ""}">${etter}</td>
+            </tr>`;
+        }).join("")).join("");
+
+    const endret = foringer.length || harKrav() || byttAntall.tilSor !== ANTALL_BYTTE || byttAntall.tilNord !== ANTALL_BYTTE;
 
     return `
     <div class="skjema">
         <b>Forutsetninger</b>
         <p class="notat">Det du setter her overstyrer beregningen, og forslagene under regnes ut på nytt med en gang.
             Valgene huskes på denne enheten.</p>
+
+        <label>Værer per medlem</label>
+        <p class="notat" style="margin-top:0">«Gi fra seg»: så mange værer skal flyttes herfra, selv om de ikke er ferdige.
+            «Ende med»: så mange værer skal medlemmet ha etterpå. «Etter» viser resultatet av forslaget.
+            Værer som hviler, telles med.</p>
+        <table class="krav">
+            <tr><th>Medlem</th><th class="midt">Har</th><th>Gi fra seg</th><th>Ende med</th><th class="midt">Etter</th></tr>
+            ${kravRader}
+        </table>
+
         <label>Antall værer i hovedbyttet</label>
         <div class="rad">
             <div style="flex:1"><small>Nordre → Søndre</small>
-                <select onchange="settBytt('tilSor', this.value)">${tall(byttAntall.tilSor)}</select></div>
+                <select onchange="settBytt('tilSor', this.value)">${tallValg(0, MAKS_BYTTE, byttAntall.tilSor)}</select></div>
             <div style="flex:1"><small>Søndre → Nordre</small>
-                <select onchange="settBytt('tilNord', this.value)">${tall(byttAntall.tilNord)}</select></div>
+                <select onchange="settBytt('tilNord', this.value)">${tallValg(0, MAKS_BYTTE, byttAntall.tilNord)}</select></div>
         </div>
-        <label>Faste føringer</label>
-        <p class="notat" style="margin-top:0">Værer som skal flyttes uansett. Fast flytting mellom avdelingene teller med i antallet over.</p>
+        <p class="notat" style="margin-top:0">Alle flyttinger mellom avdelingene teller med, også faste føringer og «gi fra seg».</p>
+
+        <label id="foringer">Faste føringer</label>
+        <p class="notat" style="margin-top:0">Værer som skal flyttes uansett, også værer som hviler.</p>
         ${rader}
         ${foringer.length < MAKS_FORINGER
             ? `<div class="liten" onclick="leggTilForing()">+ Legg til føring (${foringer.length} / ${MAKS_FORINGER})</div>` : ""}
-        ${foringer.length || byttAntall.tilSor !== ANTALL_BYTTE || byttAntall.tilNord !== ANTALL_BYTTE
-            ? `<div class="liten" onclick="nullstillForutsetninger()">Nullstill</div>` : ""}
+        ${endret ? `<div class="liten" onclick="nullstillForutsetninger()">Nullstill alt</div>` : ""}
+    </div>`;
+}
+
+function kontrollHtml(f) {
+    if (!f.kontroll.length) return "";
+    const ok = f.kontroll.every(k => k.ok);
+    return `
+    <div class="kontroll ${ok ? "ok" : "avvik"}">
+        <b>${ok ? "✓ Alle forutsetningene er oppfylt" : "⚠ Ikke alle forutsetningene kunne oppfylles"}</b>
+        <ul>${f.kontroll.map(k => `<li>${k.ok ? "✓" : "⚠"} ${esc(k.tekst)}</li>`).join("")}</ul>
     </div>`;
 }
 
@@ -1000,7 +1191,7 @@ function visLogistikk() {
 
     const kort = fs => fs.map(x => `
         <div class="forslag">
-            <div>${x.fast ? '<span class="fastmerke">Fast</span>' : ""}${stjerne(x.nr)}<b style="cursor:pointer" onclick="visVaer('${esc(x.nr)}', 'logistikk')">${esc(x.navn)}</b>${obsMerkeNr(x.nr)}</div>
+            <div>${x.merke ? `<span class="fastmerke">${esc(x.merke)}</span>` : ""}${stjerne(x.nr)}<b style="cursor:pointer" onclick="visVaer('${esc(x.nr)}', 'logistikk')">${esc(x.navn)}</b>${obsMerkeNr(x.nr)}</div>
             <div class="rute">${esc(x.fra.navn)} <span class="pil">→</span> ${esc(x.til.navn)}
                 ${x.fra.avd !== x.til.avd ? `<small style="display:inline">(${x.fra.avd} → ${x.til.avd})</small>` : ""}</div>
             <small>${erFerdig(x.fra, x.nr) ? "Ferdig hos" : "Står hos"} ${esc(x.fra.navn)} (${utfort(x.fra, x.nr)} / ${kvote(x.fra)}) –
@@ -1013,19 +1204,9 @@ function visLogistikk() {
         ${fs.length ? kort(fs) : '<p class="notat">Ingen forslag akkurat nå.</p>'}`;
 
     const b = f.bytte, st = f.stjerner;
-    const igjenSor = Math.max(0, b.onsketSor - b.fastSor), igjenNord = Math.max(0, b.onsketNord - b.fastNord);
-    const mangler = [];
-    if (b.tilSor.length < igjenSor) mangler.push(`${b.tilSor.length} av ${igjenSor} sørover`);
-    if (b.tilNord.length < igjenNord) mangler.push(`${b.tilNord.length} av ${igjenNord} nordover`);
-    const fastTekst = b.fastSor + b.fastNord
-        ? `Faste føringer dekker ${[b.fastSor ? b.fastSor + " sørover" : "", b.fastNord ? b.fastNord + " nordover" : ""].filter(Boolean).join(" og ")}. `
-        : "";
     const harBytte = b.tilSor.length + b.tilNord.length > 0;
 
     const byttedel = visBytte ? `
-        <p class="notat">${fastTekst}${mangler.length ? `Bare ${mangler.join(" og ")} passer for bytte akkurat nå. ` : ""}
-            <span class="stjerne">★</span> Stjerneværer, Nordre / Søndre: nå ${st.foer[0]} / ${st.foer[1]},
-            etter flyttingene ${st.etter[0]} / ${st.etter[1]}.</p>
         ${harBytte ? `
         ${b.tilSor.length ? `<h4>Fra Nordre til Søndre</h4>${kort(b.tilSor)}` : ""}
         ${b.tilNord.length ? `<h4>Fra Søndre til Nordre</h4>${kort(b.tilNord)}` : ""}`
@@ -1038,18 +1219,30 @@ function visLogistikk() {
     <div class="tilbake" onclick="visForside()">← Tilbake</div>
     ${advarsler.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     <h2>Logistikk</h2>
-    <p class="notat">Faste føringer legges inn først, deretter flytting innad i avdelingene. De som har flest søyer
-        igjen å pare får flest værer. Værer med 💤 Hvile foreslås ikke flyttet. Forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
-    ${forutsetningerHtml()}
+    <div class="tips">
+        <b>Har du et bestemt ønske til neste flytting?</b>
+        Legg det inn som en fast føring under «Forutsetninger». Da tas det med før alt annet i beregningen.
+        <a href="#foringer" onclick="document.getElementById('foringer').scrollIntoView({behavior:'smooth'});return false">Gå til faste føringer ↓</a>
+    </div>
+    <p class="notat">Rekkefølge: faste føringer, medlemmer som må gi fra seg værer, flytting innad i avdelingene,
+        bytte mellom avdelingene, og til slutt flytting så alle ender med ønsket antall. De som har flest søyer
+        igjen å pare får flest værer. Værer med 💤 Hvile foreslås ikke flyttet. Forslagene bygger på hvem som står
+        som «Hos» i appdata.csv.</p>
+    ${forutsetningerHtml(f)}
     ${f.foringsfeil.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
+    ${kontrollHtml(f)}
     ${f.faste.length ? seksjon("Faste føringer", f.faste) : ""}
+    ${f.maaGi.length ? seksjon("Må gi fra seg", f.maaGi) : ""}
     ${seksjon("Innad i Søndre", f.intern["Søndre"])}
     ${seksjon("Innad i Nordre", f.intern["Nordre"])}
 
     <h3 class="avsnitt">Bytte mellom Nordre og Søndre${visBytte && harBytte ? ` (${b.tilSor.length} sørover, ${b.tilNord.length} nordover)` : ""}</h3>
     <p class="notat">Bytte trengs når minst ${BYTTE_VAERER} værer er ferdige hos minst ${BYTTE_MEDLEMMER} av ${MEDLEMMER.length} medlemmer.
-        Nå: ${status.ferdige} av ${status.totalt} værer.</p>
+        Nå: ${status.ferdige} av ${status.totalt} værer.
+        <span class="stjerne">★</span> Stjerneværer, Nordre / Søndre: nå ${st.foer[0]} / ${st.foer[1]},
+        etter flyttingene ${st.etter[0]} / ${st.etter[1]}.</p>
     ${byttedel}
+    ${f.ekstra.length ? seksjon("For å nå ønsket antall", f.ekstra) : ""}
 
     <p class="notat" style="margin-top:20px">
         ${f.utenForslag} værer blir stående der de er.
