@@ -708,6 +708,7 @@ const MAKS_FORINGER = 6;       // antall faste føringer
 const MAKS_MAL = 12;           // høyeste «skal ende med» som kan velges
 const BYTTE_MEDLEMMER = 4;     // «ferdig hos de fleste medlemmene»: minst 4 av 6
 const BYTTE_VAERER = 4;        // «flere av værene»: minst 4 værer
+const FAA_PARRINGER = 3;       // en vær med så mange eller færre parringer der den står, flyttes bare når det trengs
 
 function lesLager(nokkel, std) {
     try { const v = localStorage.getItem(nokkel); return v === null ? std : JSON.parse(v); } catch (e) { return std; }
@@ -967,9 +968,14 @@ function lagForslag(medBytte) {
         }
     }
 
+    // Værer med FAA_PARRINGER eller færre parringer der de står, foreslås ikke flyttet bare fordi de er ferdige.
+    // De kan likevel flyttes når det trengs: prioriterte ønsker, «sende fra seg», «ende med» og bytte med
+    // antall satt for hånd (der velges de sist). Automatisk bytte tar dem ikke med.
+    const faa = v => utfort(v.fra, v.nr) <= FAA_PARRINGER;
+
     // 1) Innad i avdelingene
     for (const v of vaerer) {
-        if (!ledig(v) || !erFerdig(v.fra, v.nr)) continue;
+        if (!ledig(v) || !erFerdig(v.fra, v.nr) || faa(v)) continue;
         const til = mottaker(MEDLEMMER.filter(m => m.avd === v.fra.avd), v);
         if (til) flytt(v, til, res.intern[v.fra.avd]);
     }
@@ -1018,7 +1024,9 @@ function lagForslag(medBytte) {
             .filter(v => v.fra.avd === avd && ledig(v))
             .map(v => ({ ...v, poeng: restI(andreAvd(avd), v.nr) - restI(avd, v.nr), annet: restI(andreAvd(avd), v.nr) }))
             .filter(v => v.annet > 0)   // må ha noe igjen å gjøre i den andre avdelingen
-            .sort((a, b) => b.poeng - a.poeng)
+            // Værer med få parringer tas bare med når antallet i den retningen er satt for hånd
+            .filter(v => !faa(v) || byttAntall[avd === "Nordre" ? "tilSor" : "tilNord"] !== AUTO)
+            .sort((a, b) => Number(faa(a)) - Number(faa(b)) || b.poeng - a.poeng)   // værer med få parringer sist
             .slice(0, 10);
 
         const nord = kandidater("Nordre"), sor = kandidater("Søndre");
@@ -1040,12 +1048,13 @@ function lagForslag(medBytte) {
                 const sumN = n.reduce((t, v) => t + v.poeng, 0);
                 for (const so of kombinasjoner(sor, kNord)) {
                     const ss = so.filter(v => erStjerne(v.nr)).length;
+                    const lave = n.filter(faa).length + so.filter(faa).length;
                     const nNord = baseN - sn + ss, nSor = baseS - ss + sn;
                     const straff = Math.max(0, Math.abs(nNord - nSor) - 1);
                     const sum = sumN + so.reduce((t, v) => t + v.poeng, 0);
-                    // Rekkefølge: stjerner jevnt fordelt, flest parringer igjen i den andre avdelingen,
-                    // færrest stjerner flyttet.
-                    const nokkel = [-straff, sum, -(sn + ss)];
+                    // Rekkefølge: stjerner jevnt fordelt, færrest værer med få parringer der de står,
+                    // flest parringer igjen i den andre avdelingen, færrest stjerner flyttet.
+                    const nokkel = [-straff, -lave, sum, -(sn + ss)];
                     if (!beste || bedre(nokkel, beste.nokkel)) beste = { n, so, nokkel };
                 }
             }
@@ -1075,6 +1084,7 @@ function lagForslag(medBytte) {
             .sort((a, c) =>
                 (a.fra.avd === m.avd ? 0 : 1) - (c.fra.avd === m.avd ? 0 : 1) ||   // helst samme avdeling
                 stjerneStraff(a) - stjerneStraff(c) ||                             // hold stjernene jevnt fordelt
+                Number(faa(a)) - Number(faa(c)) ||                                 // helst ikke værer med få parringer
                 Number(erFerdig(c.fra, c.nr)) - Number(erFerdig(a.fra, a.nr)) ||   // helst ferdig der den står
                 igjenHos(m, c.nr) - igjenHos(m, a.nr) ||                           // mest igjen hos mottakeren
                 antallEtter(c.fra) - antallEtter(a.fra))[0];                       // fra den som har flest
@@ -1132,6 +1142,8 @@ function lagForslag(medBytte) {
                 if (hvil) deler.push(`${hvil} hviler`);
                 if (andre) deler.push(`${andre} flyttes allerede innad`);
                 if (ingenRest) deler.push(`${ingenRest} har ingen igjen å pare i ${tilAvd}`);
+                const fa = auto ? iAvd.filter(v => ledig(v) && faa(v) && restI(tilAvd, v.nr) > 0).length : 0;
+                if (fa) deler.push(`${fa} har ${FAA_PARRINGER} eller færre parringer der de står`);
                 tekst += ` ${fraAvd} har ${iAvd.length} værer${deler.length ? ": " + deler.join(", ") : ""}.`;
                 const fulle = MEDLEMMER.filter(m => m.avd === tilAvd && !kanTa(m)).map(m => m.navn);
                 if (fulle.length) tekst += ` ${fulle.join(" og ")} har nådd «Ende med» og tar ikke imot flere.`;
@@ -1464,7 +1476,8 @@ function visLogistikk() {
     </div>
     <p class="notat">Rekkefølge for automatisk beregning: 1. evt. prioriterte ønsker (faste føringer), 2. evt. endringer i antall per medlem,
         3. flytting innad i avdelingene, 4. bytte mellom avdelingene, og til slutt 5. flytting så alle ender med ønsket antall.
-        De som har flest søyer igjen å pare får flest værer. Stjerneværene (<span class="stjerne">★</span>) fordeles
+        De som har flest søyer igjen å pare får flest værer. Værer med ${FAA_PARRINGER} eller færre parringer der de står,
+        foreslås bare flyttet når det trengs av andre grunner. Stjerneværene (<span class="stjerne">★</span>) fordeles
         så jevnt som mulig, slik at det er minst én i hver avdeling. Værer med 💤 Hvile foreslås ikke flyttet.
         De automatiske forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
     ${forutsetningerHtml(f)}
