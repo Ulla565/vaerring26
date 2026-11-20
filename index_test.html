@@ -513,7 +513,7 @@ const BESKJED_URL = "https://script.google.com/macros/s/AKfycbyD8od-cGRmBTuPGwmd
 let beskjeder = [];
 
 const harBeskjeder = () => !!BESKJED_URL;
-const skjemaApen = () => !!document.getElementById("bTekst") || !!document.getElementById("fSkjema");
+const skjemaApen = () => ["bTekst", "fSkjema", "lSkjema"].some(id => document.getElementById(id));
 
 const lappTid = iso => new Date(iso).toLocaleString("nb-NO", {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Oslo"
@@ -527,6 +527,7 @@ async function lastBeskjeder() {
         if (d.ok) {
             beskjeder = d.beskjeder;
             oppdaterForinger();
+            oppdaterLaaste();
             tegnLapper();
             if (visning === visLogistikk && imp && !skjemaApen()) {   // faste føringer kan ha endret seg
                 const y = window.scrollY; visLogistikk(); window.scrollTo(0, y);
@@ -538,7 +539,7 @@ async function lastBeskjeder() {
 function tegnLapper() {
     const el = document.getElementById("lapper");
     if (!el) return;
-    el.innerHTML = beskjeder.filter(b => !erForing(b)).map(b => `
+    el.innerHTML = beskjeder.filter(b => !erSystemBeskjed(b)).map(b => `
         <div class="lapp">
             <div class="tekst">${esc(b.tekst)}</div>
             <div class="fot"><span>${esc(b.navn)}, ${esc(lappTid(b.tid))}</span>
@@ -682,7 +683,7 @@ async function installer() {
 // Antakelse: «Hos» i appdata.csv er hvor væren står nå. Flytter du en vær, endrer du «Hos».
 //
 // Forutsetninger (settes øverst på Logistikk-siden og huskes på denne enheten) overstyrer beregningen:
-//    - Faste føringer (inntil MAKS_FORINGER): «denne væren skal fra A til B».
+//    - Prioriterte ønsker / faste føringer (inntil MAKS_FORINGER): «denne væren skal fra A til B ved neste flytting».
 //    - Per medlem: «må gi fra seg» x værer (også værer som ikke er ferdige), og/eller «skal ende med» x værer.
 //    - Antall værer hver vei i hovedbyttet, valgt hver for seg (f.eks. 4 sørover og 6 nordover).
 // Rekkefølgen i beregningen:
@@ -700,12 +701,11 @@ async function installer() {
 // Værer med aktivt hvile-merke (Obs i appdata.csv) flyttes ikke, med mindre de står i en fast føring.
 // De telles likevel med i antallet værer hvert medlem har.
 // Til slutt kontrolleres det om forutsetningene faktisk ble oppfylt.
-// Forslaget kan låses som en gul huskelapp nederst på Logistikk-siden (lagres på denne enheten).
+// Forslaget kan låses som en gul huskelapp nederst på Logistikk-siden (felles for alle, lagres i Google-regnearket).
 const ANTALL_BYTTE = 4;        // standard antall værer hver vei i et bytte
 const MAKS_BYTTE = 8;          // høyeste antall som kan velges per retning
 const MAKS_FORINGER = 6;       // antall faste føringer
 const MAKS_MAL = 12;           // høyeste «skal ende med» som kan velges
-const MAKS_LAASTE = 5;         // antall låste lapper som tas vare på
 const BYTTE_MEDLEMMER = 4;     // «ferdig hos de fleste medlemmene»: minst 4 av 6
 const BYTTE_VAERER = 4;        // «flere av værene»: minst 4 værer
 
@@ -753,7 +753,6 @@ let medlemKrav = (() => {
 })();
 const harKrav = () => MEDLEMMER.some(m => medlemKrav[m.navn].gi !== null || medlemKrav[m.navn].mal !== null);
 
-let laaste = (() => { const l = lesLager("vaerring_laaste", []); return Array.isArray(l) ? l : []; })();
 let visByttLikevel = false;
 let sisteForslag = null;
 // Er boksen «Antall værer per medlem» åpen? Den er alltid åpen når noe er satt i den.
@@ -782,8 +781,8 @@ const medlemValgHtml = (valgt, tom) => `<option value="">${tom}</option>` + AVDE
     `<optgroup label="${a}">${MEDLEMMER.filter(m => m.avd === a).map(m =>
         `<option value="${esc(m.navn)}"${m.navn === valgt ? " selected" : ""}>${esc(m.navn)}</option>`).join("")}</optgroup>`).join("");
 const foringKnapp = () => foringer.length < MAKS_FORINGER
-    ? `<div class="liten" onclick="apneForingSkjema()">+ Ny fast føring (${foringer.length} / ${MAKS_FORINGER})</div>`
-    : `<p class="notat">Det kan være ${MAKS_FORINGER} faste føringer samtidig. Slett en for å legge inn en ny.</p>`;
+    ? `<div class="liten" onclick="apneForingSkjema()">+ Nytt prioritert ønske for neste flytting (${foringer.length} / ${MAKS_FORINGER})</div>`
+    : `<p class="notat">Det kan være ${MAKS_FORINGER} prioriterte ønsker samtidig. Slett et for å legge inn et nytt.</p>`;
 
 function apneForingSkjema() {
     let sist = "";
@@ -803,7 +802,7 @@ function apneForingSkjema() {
         <input id="fKode" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off">
         <div class="skjemafeil" id="fFeil"></div>
         <div class="rad">
-            <div class="liten ok" id="fSend" onclick="sendForing()">Legg inn</div>
+            <div class="liten ok" id="fSend" onclick="sendForing()">Legg inn ønsket</div>
             <div class="liten" onclick="lukkForingSkjema()">Avbryt</div>
         </div>
     </div>`;
@@ -826,7 +825,7 @@ async function sendForing() {
     if (!nr) { feil.textContent = "Velg en vær."; return; }
     if (!fra || !til) { feil.textContent = "Velg hvem væren skal fra og til."; return; }
     if (fra === til) { feil.textContent = "Fra og til kan ikke være samme medlem."; return; }
-    if (foringer.some(f => f.nr === nr)) { feil.textContent = "Denne væren har allerede en fast føring. Slett den først."; return; }
+    if (foringer.some(f => f.nr === nr)) { feil.textContent = "Denne væren har allerede et prioritert ønske. Slett det først."; return; }
     if (!navn) { feil.textContent = "Velg navnet ditt."; return; }
     if (kode.length < 4) { feil.textContent = "Skriv inn koden."; return; }
 
@@ -839,12 +838,12 @@ async function sendForing() {
         await lastBeskjeder();
     } else {
         feil.textContent = d.feil || "Noe gikk galt.";
-        knapp.textContent = "Legg inn";
+        knapp.textContent = "Legg inn ønsket";
     }
 }
 
 async function slettForing(id) {
-    const kode = prompt("Skriv koden for å slette denne faste føringen:");
+    const kode = prompt("Skriv koden for å slette dette prioriterte ønsket:");
     if (!kode) return;
     const d = await sendBeskjed({ handling: "slett", id, kode });
     if (d.ok) await lastBeskjeder();
@@ -852,7 +851,7 @@ async function slettForing(id) {
 }
 
 function nullstillForutsetninger() {
-    if (!confirm("Fjerne alle krav per medlem og sette antall i byttet tilbake til " + ANTALL_BYTTE + " hver vei? Faste føringer påvirkes ikke.")) return;
+    if (!confirm("Fjerne alle krav per medlem og sette antall i byttet tilbake til " + ANTALL_BYTTE + " hver vei? Prioriterte ønsker påvirkes ikke.")) return;
     medlemKrav = tomtKrav(); skrivLager("vaerring_medlemskrav", medlemKrav);
     byttAntall = { tilSor: ANTALL_BYTTE, tilNord: ANTALL_BYTTE }; skrivLager("vaerring_bytte", byttAntall);
     visLogistikk();
@@ -908,11 +907,11 @@ function lagForslag(medBytte) {
         const v = vaerer.find(x => x.nr === f.nr);
         const fra = medlemNavn(f.fra) || (v && v.fra);
         const til = medlemNavn(f.til);
-        if (!v) { res.foringsfeil.push(`Føring ${i + 1}: Fant ikke væren ${f.nr}.`); return; }
+        if (!v) { res.foringsfeil.push(`Ønske ${i + 1}: Fant ikke væren ${f.nr}.`); return; }
         if (til && v.fra.id === til.id) { res.utforte++; return; }   // står allerede der den skal (utført)
-        if (brukt.has(v.nr)) { res.foringsfeil.push(`Føring ${i + 1}: ${v.navn} står i en føring fra før. Bare den første brukes.`); return; }
-        if (!til || !fra) { res.foringsfeil.push(`Føring ${i + 1}: Ukjent medlem.`); return; }
-        if (fra.id === til.id) { res.foringsfeil.push(`Føring ${i + 1}: ${v.navn} har samme medlem som fra og til.`); return; }
+        if (brukt.has(v.nr)) { res.foringsfeil.push(`Ønske ${i + 1}: ${v.navn} har et prioritert ønske fra før. Bare det første brukes.`); return; }
+        if (!til || !fra) { res.foringsfeil.push(`Ønske ${i + 1}: Ukjent medlem.`); return; }
+        if (fra.id === til.id) { res.foringsfeil.push(`Ønske ${i + 1}: ${v.navn} har samme medlem som fra og til.`); return; }
         v.fra = fra;
         brukt.add(v.nr);
         gyldige.push({ v, til });
@@ -941,7 +940,7 @@ function lagForslag(medBytte) {
     };
 
     // 0b) Faste føringer
-    gyldige.forEach(({ v, til }) => flytt(v, til, res.faste, "Fast"));
+    gyldige.forEach(({ v, til }) => flytt(v, til, res.faste, "Prioritert"));
 
     // Værer med hvile-merke foreslås ikke flyttet
     const hviler = new Set(vaerer.filter(v => !flyttet.has(v.nr) &&
@@ -1067,7 +1066,7 @@ function lagForslag(medBytte) {
     const K = res.kontroll;
     const fylteForinger = foringer.filter(f => f.nr && f.til).length;
     if (fylteForinger - res.utforte > 0) K.push({ ok: res.faste.length === fylteForinger - res.utforte,
-        tekst: `Faste føringer: ${res.faste.length} av ${fylteForinger - res.utforte} tatt med.` });
+        tekst: `Prioriterte ønsker: ${res.faste.length} av ${fylteForinger - res.utforte} tatt med.` });
 
     MEDLEMMER.forEach(m => {
         const k = medlemKrav[m.navn];
@@ -1081,7 +1080,7 @@ function lagForslag(medBytte) {
             const n = antallEtter(m), ok = n === k.mal;
             K.push({ ok, tekst: `${m.navn} ender med ${n} værer (ønsket: ${k.mal}).` +
                 (ok ? "" : n < k.mal ? " Fant ikke flere værer som kan flyttes hit uten å tømme andre."
-                                     : " Noen av værene kan ikke flyttes (hviler eller fast føring).") });
+                                     : " Noen av værene kan ikke flyttes (hviler eller har et prioritert ønske).") });
         }
     });
 
@@ -1114,53 +1113,144 @@ function lagForslag(medBytte) {
 }
 
 // ---------- Låste forslag (gule huskelapper på Logistikk-siden) ----------
-function laasForslag() {
-    const f = sisteForslag;
-    if (!f) return;
-    const grupper = [
-        ["Faste føringer", f.faste],
-        ["Må gi fra seg", f.maaGi],
-        ["Innad i Søndre", f.intern["Søndre"]],
-        ["Innad i Nordre", f.intern["Nordre"]],
-        ["Nordre → Søndre", f.bytte.tilSor],
-        ["Søndre → Nordre", f.bytte.tilNord],
-        ["For å nå ønsket antall", f.ekstra]
-    ];
-    const linjer = [];
-    grupper.forEach(([gruppe, liste]) => liste.forEach(x =>
-        linjer.push({ gruppe, nr: x.nr, navn: x.navn, fra: x.fra.navn, til: x.til.navn })));
-    if (!linjer.length) { alert("Det er ingen flyttinger å låse akkurat nå."); return; }
+// Felles for alle: lagres som en beskjed i Google-regnearket, pakket kompakt så den holder seg under 200 tegn:
+//   «LÅST|F413409:05|S413374:10,413388:21»
+//   gruppebokstav + oppføringer «siste 6 sifre i kåringsnr : fra-medlem tilmedlem» (medlemmets plass i MEDLEMMER).
+// Manuell avkrysning lagres bare på denne enheten. Avkrysning ut fra «Hos» i appdata.csv vises for alle.
+const LAAST_PREFIKS = "LÅST|";
+const MAKS_TEGN = 200;   // samme grense som for beskjeder
+const LAAST_GRUPPER = [
+    ["F", "Prioriterte ønsker", f => f.faste],
+    ["G", "Må gi fra seg", f => f.maaGi],
+    ["S", "Innad i Søndre", f => f.intern["Søndre"]],
+    ["N", "Innad i Nordre", f => f.intern["Nordre"]],
+    ["s", "Nordre → Søndre", f => f.bytte.tilSor],
+    ["n", "Søndre → Nordre", f => f.bytte.tilNord],
+    ["M", "For å nå ønsket antall", f => f.ekstra]
+];
+const erLaast = b => String(b.tekst || "").startsWith(LAAST_PREFIKS);
+const erSystemBeskjed = b => erForing(b) || erLaast(b);
 
-    laaste.unshift({ id: Date.now().toString(36), tid: new Date().toISOString(), linjer, gjort: [] });
-    laaste = laaste.slice(0, MAKS_LAASTE);
-    skrivLager("vaerring_laaste", laaste);
-    visLogistikk();
-    const el = document.getElementById("laaste");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+function pakkLaast(f) {
+    const deler = LAAST_GRUPPER.map(([bokstav, , hent]) => {
+        const liste = hent(f);
+        if (!liste.length) return "";
+        return bokstav + liste.map(x => `${x.nr.slice(-6)}:${MEDLEMMER.indexOf(x.fra)}${MEDLEMMER.indexOf(x.til)}`).join(",");
+    }).filter(Boolean);
+    return deler.length ? LAAST_PREFIKS + deler.join("|") : "";
+}
+
+function pakkUtLaast(tekst) {
+    const linjer = [];
+    String(tekst).split("|").slice(1).forEach(del => {
+        const gruppe = (LAAST_GRUPPER.find(g => g[0] === del[0]) || [, "Flytting"])[1];
+        del.slice(1).split(",").filter(Boolean).forEach(o => {
+            const [kort, ft = ""] = o.split(":");
+            const v = vaerData.find(x => String(x["Kåringsnr"]).endsWith(kort));
+            const fra = MEDLEMMER[+ft[0]], til = MEDLEMMER[+ft[1]];
+            linjer.push({
+                gruppe, nr: v ? v["Kåringsnr"] : kort, navn: v ? v["Vær"] : kort,
+                fra: fra ? fra.navn : "?", til: til ? til.navn : "?"
+            });
+        });
+    });
+    return linjer;
+}
+
+// Låste lapper fra regnearket, nyeste først
+let laaste = [];
+function oppdaterLaaste() {
+    laaste = beskjeder.filter(erLaast)
+        .map(b => ({ id: b.id, navn: b.navn, tid: b.tid, tekst: b.tekst }))   // pakkes ut når de tegnes, når appdata.csv er lastet
+        .sort((a, b) => (new Date(b.tid) - new Date(a.tid)) || 0);
+}
+
+let laastGjort = (() => { const g = lesLager("vaerring_laast_gjort", {}); return g && typeof g === "object" ? g : {}; })();
+
+const laasKnapp = () => `<div class="installer" onclick="apneLaasSkjema()">🔒 Lås forslaget som huskelapp for alle</div>`;
+
+function apneLaasSkjema() {
+    const tekst = sisteForslag ? pakkLaast(sisteForslag) : "";
+    const el = document.getElementById("laasOmraade");
+    if (!el) return;
+    if (!tekst) { alert("Det er ingen flyttinger å låse akkurat nå."); return; }
+    const antall = LAAST_GRUPPER.reduce((s, g) => s + g[2](sisteForslag).length, 0);
+    let sist = "";
+    try { sist = localStorage.getItem("vaerring_navn") || ""; } catch (e) {}
+    el.innerHTML = `
+    <div class="skjema" id="lSkjema">
+        <b>Lås forslaget (${antall} flyttinger)</b>
+        <p class="notat">Huskelappen blir synlig for alle på Logistikk-siden, også om forslaget senere endrer seg.</p>
+        <label for="lNavn">Låst av</label>
+        <select id="lNavn">${medlemValgHtml(sist, "Velg navn")}</select>
+        <label for="lKode">Kode</label>
+        <input id="lKode" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off">
+        <div class="skjemafeil" id="lFeil">${tekst.length > MAKS_TEGN
+            ? `Forslaget er for stort til å låses (${tekst.length} tegn, maks ${MAKS_TEGN}). Lås det i to omganger, f.eks. med færre værer i byttet.` : ""}</div>
+        <div class="rad">
+            <div class="liten ok" id="lSend" onclick="sendLaas()">Lås</div>
+            <div class="liten" onclick="lukkLaasSkjema()">Avbryt</div>
+        </div>
+    </div>`;
+}
+function lukkLaasSkjema() {
+    const el = document.getElementById("laasOmraade");
+    if (el) el.innerHTML = laasKnapp();
+}
+
+let senderLaas = false;
+async function sendLaas() {
+    if (senderLaas) return;
+    const navn = document.getElementById("lNavn").value, kode = document.getElementById("lKode").value;
+    const feil = document.getElementById("lFeil"), knapp = document.getElementById("lSend");
+    const tekst = sisteForslag ? pakkLaast(sisteForslag) : "";
+    if (!tekst) { feil.textContent = "Det er ingen flyttinger å låse."; return; }
+    if (tekst.length > MAKS_TEGN) { feil.textContent = `Forslaget er for stort til å låses (${tekst.length} tegn, maks ${MAKS_TEGN}).`; return; }
+    if (!navn) { feil.textContent = "Velg navnet ditt."; return; }
+    if (kode.length < 4) { feil.textContent = "Skriv inn koden."; return; }
+
+    senderLaas = true; feil.textContent = ""; knapp.textContent = "Låser...";
+    const d = await sendBeskjed({ handling: "ny", navn, kode, tekst });
+    senderLaas = false;
+    if (d.ok) {
+        try { localStorage.setItem("vaerring_navn", navn); } catch (e) {}
+        lukkLaasSkjema();
+        await lastBeskjeder();
+        const el = document.getElementById("laaste");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+        feil.textContent = d.feil || "Noe gikk galt.";
+        knapp.textContent = "Lås";
+    }
 }
 
 function vekslGjort(id, nr) {
-    const l = laaste.find(x => x.id === id);
-    if (!l) return;
-    l.gjort = l.gjort.includes(nr) ? l.gjort.filter(x => x !== nr) : l.gjort.concat(nr);
-    skrivLager("vaerring_laaste", laaste);
+    const g = laastGjort[id] || [];
+    laastGjort[id] = g.includes(nr) ? g.filter(x => x !== nr) : g.concat(nr);
+    // Rydd bort avkrysninger for lapper som ikke finnes lenger
+    Object.keys(laastGjort).forEach(k => { if (!laaste.some(l => l.id === k)) delete laastGjort[k]; });
+    skrivLager("vaerring_laast_gjort", laastGjort);
     tegnLaaste();
 }
 
-function fjernLaast(id) {
-    if (!confirm("Fjerne denne huskelappen?")) return;
-    laaste = laaste.filter(x => x.id !== id);
-    skrivLager("vaerring_laaste", laaste);
-    tegnLaaste();
+async function fjernLaast(id) {
+    const kode = prompt("Skriv koden for å fjerne denne huskelappen for alle:");
+    if (!kode) return;
+    const d = await sendBeskjed({ handling: "slett", id, kode });
+    if (d.ok) await lastBeskjeder();
+    else alert(d.feil || "Kunne ikke fjerne.");
 }
 
-// En linje regnes som gjort når den er krysset av, eller når «Hos» i appdata.csv viser at væren er flyttet.
+// En linje regnes som gjort når «Hos» i appdata.csv viser at væren er flyttet (synlig for alle),
+// eller når den er krysset av for hånd (bare på denne enheten).
 function tegnLaaste() {
     const el = document.getElementById("laaste");
     if (!el) return;
-    el.innerHTML = laaste.map(l => {
-        const erGjort = x => l.gjort.includes(x.nr) ||
-            (vaerData.find(v => v["Kåringsnr"] === x.nr) || {})["Hos"] === x.til;
+    el.innerHTML = laaste.map(lapp => {
+        const l = { ...lapp, linjer: pakkUtLaast(lapp.tekst) };
+        const manuelt = laastGjort[l.id] || [];
+        const flyttet = x => (vaerData.find(v => v["Kåringsnr"] === x.nr) || {})["Hos"] === x.til;
+        const erGjort = x => flyttet(x) || manuelt.includes(x.nr);
         const antallGjort = l.linjer.filter(erGjort).length;
         let gruppe = "";
         const linjer = l.linjer.map(x => {
@@ -1174,7 +1264,7 @@ function tegnLaaste() {
         <div class="lapp">
             <div><b>🔒 Låst forslag</b></div>
             <ul class="huske">${linjer}</ul>
-            <div class="fot"><span>Låst ${esc(lappTid(l.tid))} · ${antallGjort} av ${l.linjer.length} gjort</span>
+            <div class="fot"><span>Låst av ${esc(l.navn)}, ${esc(lappTid(l.tid))} · ${antallGjort} av ${l.linjer.length} gjort</span>
                 <span class="slett" onclick="fjernLaast('${esc(l.id)}')">Fjern</span></div>
         </div>`;
     }).join("");
@@ -1191,11 +1281,11 @@ function forutsetningerHtml(f) {
         const utfort = v && v["Hos"] === fo.til;
         return `
         <div class="foring vis${utfort ? " utfort" : ""}">
-            <div class="foringtopp"><span><span class="fastmerke">Fast</span>${stjerne(fo.nr)}<b>${esc(v ? v["Vær"] : fo.nr)}</b>${obsMerke(v)}</span>
+            <div class="foringtopp"><span><span class="fastmerke">Prioritert</span>${stjerne(fo.nr)}<b>${esc(v ? v["Vær"] : fo.nr)}</b>${obsMerke(v)}</span>
                 <span class="slett" onclick="slettForing('${esc(fo.id)}')">✕ Slett</span></div>
             <div class="rute">${esc(fo.fra)} <span class="pil">→</span> ${esc(fo.til)}
                 ${utfort ? '<span class="ferdig">✓ Utført</span>' : ""}</div>
-            <small>Lagt inn av ${esc(fo.navn)}, ${esc(lappTid(fo.tid))}${utfort ? ". Væren står der den skal, og føringen kan slettes." : ""}</small>
+            <small>Lagt inn av ${esc(fo.navn)}, ${esc(lappTid(fo.tid))}${utfort ? ". Væren står der den skal, og ønsket kan slettes." : ""}</small>
         </div>`;
     }).join("");
 
@@ -1219,8 +1309,9 @@ function forutsetningerHtml(f) {
     return `
     <div class="skjema">
         <b>Forutsetninger</b>
-        <p class="notat">Det du setter her overstyrer beregningen, og forslagene under regnes ut på nytt med en gang.
-            <b>Faste føringer er felles og synlige for alle.</b> De andre valgene huskes bare på denne enheten.</p>
+        <p class="notat">Det du setter her overstyrer de automatiske beregningene, og forslagene under regnes ut på nytt med en gang.
+            <b>Prioriterte ønsker og låste huskelapper er felles og synlige for alle.</b>
+            De andre valgene huskes bare på denne enheten.</p>
 
         <details class="utvid"${visKrav || harKrav() ? " open" : ""} ontoggle="visKrav = this.open">
             <summary>Antall værer per medlem – kun aktuelt dersom antallet ikke skal byttes «likt»${harKrav() ? ' <span class="obs">I bruk</span>' : ""}</summary>
@@ -1240,12 +1331,13 @@ function forutsetningerHtml(f) {
             <div style="flex:1"><small>Søndre → Nordre</small>
                 <select onchange="settBytt('tilNord', this.value)">${tallValg(0, MAKS_BYTTE, byttAntall.tilNord)}</select></div>
         </div>
-        <p class="notat" style="margin-top:0">Alle flyttinger mellom avdelingene teller med, også faste føringer og «gi fra seg».</p>
+        <p class="notat" style="margin-top:0">Alle flyttinger mellom avdelingene teller med, også prioriterte ønsker og «gi fra seg».</p>
 
-        <label id="foringer">Faste føringer</label>
-        <p class="notat" style="margin-top:0">Værer som skal flyttes uansett, også værer som hviler. Alle ser dem.
-            Du trenger navnet ditt og koden for å legge inn eller slette en føring.</p>
-        ${harBeskjeder() ? `${rader}<div id="nyForing">${foringKnapp()}</div>` : '<p class="notat">Faste føringer er ikke satt opp.</p>'}
+        <label id="foringer">Prioriterte ønsker for neste flytting (faste føringer)</label>
+        <p class="notat" style="margin-top:0">Her legger hvert medlem inn værer de ønsker flyttet ved neste flytting.
+            Ønskene legges inn først og går foran de automatiske forslagene, også for værer som hviler.
+            Alle ser dem. Du trenger navnet ditt og koden for å legge inn eller slette et ønske.</p>
+        ${harBeskjeder() ? `${rader}<div id="nyForing">${foringKnapp()}</div>` : '<p class="notat">Prioriterte ønsker er ikke satt opp.</p>'}
         ${endret ? `<div class="liten" onclick="nullstillForutsetninger()">Nullstill alt</div>` : ""}
     </div>`;
 }
@@ -1299,17 +1391,18 @@ function visLogistikk() {
     <h2>Logistikk</h2>
     <div class="tips">
         <b>Har du et bestemt ønske til neste flytting?</b>
-        Legg det inn som en fast føring under «Forutsetninger». Alle kan se den, og den tas med før alt annet i beregningen.
-        <a href="#foringer" onclick="document.getElementById('foringer').scrollIntoView({behavior:'smooth'});return false">Gå til faste føringer ↓</a>
+        Legg det inn som et prioritert ønske (fast føring) under «Forutsetninger». Alle kan se det, og det går foran
+        de automatiske forslagene.
+        <a href="#foringer" onclick="document.getElementById('foringer').scrollIntoView({behavior:'smooth'});return false">Legg inn et prioritert ønske ↓</a>
     </div>
-    <p class="notat">Rekkefølge: faste føringer, medlemmer som må gi fra seg værer, flytting innad i avdelingene,
-        bytte mellom avdelingene, og til slutt flytting så alle ender med ønsket antall. De som har flest søyer
-        igjen å pare får flest værer. Værer med 💤 Hvile foreslås ikke flyttet. Forslagene bygger på hvem som står
-        som «Hos» i appdata.csv.</p>
+    <p class="notat">Rekkefølge for automatisk beregning: 1. evt. prioriterte ønsker (faste føringer), 2. evt. endringer i antall per medlem,
+        3. flytting innad i avdelingene, 4. bytte mellom avdelingene, og til slutt 5. flytting så alle ender med ønsket antall.
+        De som har flest søyer igjen å pare får flest værer. Værer med 💤 Hvile foreslås ikke flyttet.
+        De automatiske forslagene bygger på hvem som står som «Hos» i appdata.csv.</p>
     ${forutsetningerHtml(f)}
     ${f.foringsfeil.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     ${kontrollHtml(f)}
-    ${f.faste.length ? seksjon("Faste føringer", f.faste) : ""}
+    ${f.faste.length ? seksjon("Prioriterte ønsker", f.faste) : ""}
     ${f.maaGi.length ? seksjon("Må gi fra seg", f.maaGi) : ""}
     ${seksjon("Innad i Søndre", f.intern["Søndre"])}
     ${seksjon("Innad i Nordre", f.intern["Nordre"])}
@@ -1325,10 +1418,10 @@ function visLogistikk() {
     <p class="notat" style="margin-top:20px">
         ${f.utenForslag} værer blir stående der de er.
         ${f.hviler.length ? `Hviler og flyttes ikke: ${f.hviler.map(v => stjerne(v.nr) + esc(v.navn)).join(", ")}.
-            Legg inn en fast føring hvis en av dem likevel skal flyttes.` : ""}
+            Legg inn et prioritert ønske hvis en av dem likevel skal flyttes.` : ""}
         ${f.ferdigOveralt.length ? `Ferdige hos alle: ${f.ferdigOveralt.map(v => stjerne(v.nr) + esc(v.navn)).join(", ")}.` : ""}
     </p>
-    <div class="installer" onclick="laasForslag()">🔒 Lås forslaget som huskelapp</div>
+    <div id="laasOmraade">${harBeskjeder() ? laasKnapp() : ""}</div>
     <div class="lapper" id="laaste"></div>`;
     tegnLaaste();
 }
