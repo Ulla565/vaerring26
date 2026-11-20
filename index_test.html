@@ -107,6 +107,14 @@ td:last-child{text-align:right;font-weight:bold}
 .kontroll.ok{background:#e3f4e8;border:1px solid #2e9e4f}
 .kontroll.avvik{background:#fde8e8;border:1px solid #c62828}
 .kontroll ul{margin:6px 0 0;padding-left:4px;list-style:none;font-size:14px;line-height:1.5}
+.foring.vis{background:#eef4ff;border-color:#bcd0f5}
+.foring.vis .rute{font-size:17px;margin:4px 0}
+.foring.vis small{color:#555;display:block}
+.foring.utfort{opacity:.7}
+.skjema .foring label{margin-top:2px}
+.utvid{border:1px solid #e3e3e3;border-radius:8px;padding:8px 10px;margin:10px 0 12px;background:#fafafa}
+.utvid summary{cursor:pointer;font-weight:bold;font-size:14px;line-height:1.4}
+.utvid[open] summary{margin-bottom:4px}
 .huske li.gruppe{cursor:default;font-size:12px;font-weight:bold;color:#6b5f00;text-transform:uppercase;padding-top:8px}
 </style>
 </head>
@@ -505,7 +513,7 @@ const BESKJED_URL = "https://script.google.com/macros/s/AKfycbyD8od-cGRmBTuPGwmd
 let beskjeder = [];
 
 const harBeskjeder = () => !!BESKJED_URL;
-const skjemaApen = () => !!document.getElementById("bTekst");
+const skjemaApen = () => !!document.getElementById("bTekst") || !!document.getElementById("fSkjema");
 
 const lappTid = iso => new Date(iso).toLocaleString("nb-NO", {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Oslo"
@@ -516,14 +524,21 @@ async function lastBeskjeder() {
     try {
         const r = await fetch(BESKJED_URL + "?t=" + Date.now());
         const d = await r.json();
-        if (d.ok) { beskjeder = d.beskjeder; tegnLapper(); }
+        if (d.ok) {
+            beskjeder = d.beskjeder;
+            oppdaterForinger();
+            tegnLapper();
+            if (visning === visLogistikk && imp && !skjemaApen()) {   // faste føringer kan ha endret seg
+                const y = window.scrollY; visLogistikk(); window.scrollTo(0, y);
+            }
+        }
     } catch (e) { /* uten nett beholdes det som allerede er hentet */ }
 }
 
 function tegnLapper() {
     const el = document.getElementById("lapper");
     if (!el) return;
-    el.innerHTML = beskjeder.map(b => `
+    el.innerHTML = beskjeder.filter(b => !erForing(b)).map(b => `
         <div class="lapp">
             <div class="tekst">${esc(b.tekst)}</div>
             <div class="fot"><span>${esc(b.navn)}, ${esc(lappTid(b.tid))}</span>
@@ -711,11 +726,18 @@ let byttAntall = (() => {
     return b && ok(b.tilSor) && ok(b.tilNord) ? b : standardBytte();
 })();
 
-// Faste føringer: [{ nr, fra, til }] der fra/til er medlemsnavn
-let foringer = (() => {
-    const f = lesLager("vaerring_foringer", []);
-    return Array.isArray(f) ? f.slice(0, MAKS_FORINGER).map(x => ({ nr: x.nr || "", fra: x.fra || "", til: x.til || "" })) : [];
-})();
+// Faste føringer er felles for alle. De lagres som beskjeder i Google-regnearket (samme skript som de gule lappene)
+// med teksten «FØRING|kåringsnr|fra|til», og vises ikke som gule lapper.
+// foringer = [{ id, nr, fra, til, navn, tid }], eldste først (ved to føringer på samme vær gjelder den eldste).
+const FORING_PREFIKS = "FØRING|";
+const erForing = b => String(b.tekst || "").startsWith(FORING_PREFIKS);
+let foringer = [];
+function oppdaterForinger() {
+    foringer = beskjeder.filter(erForing).map(b => {
+        const [, nr, fra, til] = String(b.tekst).split("|");
+        return { id: b.id, nr: nr || "", fra: fra || "", til: til || "", navn: b.navn, tid: b.tid };
+    }).sort((a, b) => (new Date(a.tid) - new Date(b.tid)) || 0);
+}
 
 // Krav per medlem: { navn: { gi, mal } }, null = ikke satt
 const tomtKrav = () => Object.fromEntries(MEDLEMMER.map(m => [m.navn, { gi: null, mal: null }]));
@@ -734,6 +756,8 @@ const harKrav = () => MEDLEMMER.some(m => medlemKrav[m.navn].gi !== null || medl
 let laaste = (() => { const l = lesLager("vaerring_laaste", []); return Array.isArray(l) ? l : []; })();
 let visByttLikevel = false;
 let sisteForslag = null;
+// Er boksen «Antall værer per medlem» åpen? Den er alltid åpen når noe er satt i den.
+let visKrav = false;
 
 function settBytt(retning, n) {
     byttAntall[retning] = +n;
@@ -749,27 +773,86 @@ function settKrav(navn, felt, verdi) {
     visLogistikk();
 }
 
-const lagreForinger = () => skrivLager("vaerring_foringer", foringer);
-function leggTilForing() {
-    if (foringer.length >= MAKS_FORINGER) return;
-    foringer.push({ nr: "", fra: "", til: "" });
-    lagreForinger(); visLogistikk();
+// Skjema for ny fast føring (navn og kode som for beskjeder)
+const vaerValgHtml = () => `<option value="">Velg vær</option>` + vaerData
+    .filter(v => imp.vaerer[v["Kåringsnr"]])
+    .slice().sort((a, b) => a["Vær"].localeCompare(b["Vær"], "no"))
+    .map(v => `<option value="${esc(v["Kåringsnr"])}">${erStjerne(v["Kåringsnr"]) ? "★ " : ""}${esc(v["Vær"])}${obsAktiv(v) ? " (hviler)" : ""}</option>`).join("");
+const medlemValgHtml = (valgt, tom) => `<option value="">${tom}</option>` + AVDELINGER.map(a =>
+    `<optgroup label="${a}">${MEDLEMMER.filter(m => m.avd === a).map(m =>
+        `<option value="${esc(m.navn)}"${m.navn === valgt ? " selected" : ""}>${esc(m.navn)}</option>`).join("")}</optgroup>`).join("");
+const foringKnapp = () => foringer.length < MAKS_FORINGER
+    ? `<div class="liten" onclick="apneForingSkjema()">+ Ny fast føring (${foringer.length} / ${MAKS_FORINGER})</div>`
+    : `<p class="notat">Det kan være ${MAKS_FORINGER} faste føringer samtidig. Slett en for å legge inn en ny.</p>`;
+
+function apneForingSkjema() {
+    let sist = "";
+    try { sist = localStorage.getItem("vaerring_navn") || ""; } catch (e) {}
+    document.getElementById("nyForing").innerHTML = `
+    <div class="foring" id="fSkjema">
+        <label for="fNr">Vær</label>
+        <select id="fNr" onchange="velgForingVaer(this.value)">${vaerValgHtml()}</select>
+        <div class="fratil">
+            <select id="fFra" aria-label="Fra">${medlemValgHtml("", "Fra")}</select>
+            <span class="pil">→</span>
+            <select id="fTil" aria-label="Til">${medlemValgHtml("", "Til")}</select>
+        </div>
+        <label for="fNavn">Lagt inn av</label>
+        <select id="fNavn">${medlemValgHtml(sist, "Velg navn")}</select>
+        <label for="fKode">Kode</label>
+        <input id="fKode" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off">
+        <div class="skjemafeil" id="fFeil"></div>
+        <div class="rad">
+            <div class="liten ok" id="fSend" onclick="sendForing()">Legg inn</div>
+            <div class="liten" onclick="lukkForingSkjema()">Avbryt</div>
+        </div>
+    </div>`;
 }
-function endreForing(i, felt, verdi) {
-    const f = foringer[i];
-    if (!f) return;
-    f[felt] = verdi;
-    if (felt === "nr") {   // ny vær: «fra» settes til der den står nå
-        const v = vaerData.find(x => x["Kåringsnr"] === verdi);
-        f.fra = v ? v["Hos"] : "";
-        if (f.til === f.fra) f.til = "";
+function lukkForingSkjema() {
+    const el = document.getElementById("nyForing");
+    if (el) el.innerHTML = foringKnapp();
+}
+function velgForingVaer(nr) {   // «fra» settes til der væren står nå
+    const v = vaerData.find(x => x["Kåringsnr"] === nr);
+    document.getElementById("fFra").value = v ? v["Hos"] : "";
+}
+
+let senderForing = false;
+async function sendForing() {
+    if (senderForing) return;
+    const verdi = id => document.getElementById(id).value;
+    const nr = verdi("fNr"), fra = verdi("fFra"), til = verdi("fTil"), navn = verdi("fNavn"), kode = verdi("fKode");
+    const feil = document.getElementById("fFeil"), knapp = document.getElementById("fSend");
+    if (!nr) { feil.textContent = "Velg en vær."; return; }
+    if (!fra || !til) { feil.textContent = "Velg hvem væren skal fra og til."; return; }
+    if (fra === til) { feil.textContent = "Fra og til kan ikke være samme medlem."; return; }
+    if (foringer.some(f => f.nr === nr)) { feil.textContent = "Denne væren har allerede en fast føring. Slett den først."; return; }
+    if (!navn) { feil.textContent = "Velg navnet ditt."; return; }
+    if (kode.length < 4) { feil.textContent = "Skriv inn koden."; return; }
+
+    senderForing = true; feil.textContent = ""; knapp.textContent = "Sender...";
+    const d = await sendBeskjed({ handling: "ny", navn, kode, tekst: [FORING_PREFIKS.slice(0, -1), nr, fra, til].join("|") });
+    senderForing = false;
+    if (d.ok) {
+        try { localStorage.setItem("vaerring_navn", navn); } catch (e) {}
+        lukkForingSkjema();
+        await lastBeskjeder();
+    } else {
+        feil.textContent = d.feil || "Noe gikk galt.";
+        knapp.textContent = "Legg inn";
     }
-    lagreForinger(); visLogistikk();
 }
-function fjernForing(i) { foringer.splice(i, 1); lagreForinger(); visLogistikk(); }
+
+async function slettForing(id) {
+    const kode = prompt("Skriv koden for å slette denne faste føringen:");
+    if (!kode) return;
+    const d = await sendBeskjed({ handling: "slett", id, kode });
+    if (d.ok) await lastBeskjeder();
+    else alert(d.feil || "Kunne ikke slette.");
+}
+
 function nullstillForutsetninger() {
-    if (!confirm("Fjerne alle føringer og krav, og sette antall i byttet tilbake til " + ANTALL_BYTTE + " hver vei?")) return;
-    foringer = []; lagreForinger();
+    if (!confirm("Fjerne alle krav per medlem og sette antall i byttet tilbake til " + ANTALL_BYTTE + " hver vei? Faste føringer påvirkes ikke.")) return;
     medlemKrav = tomtKrav(); skrivLager("vaerring_medlemskrav", medlemKrav);
     byttAntall = { tilSor: ANTALL_BYTTE, tilNord: ANTALL_BYTTE }; skrivLager("vaerring_bytte", byttAntall);
     visLogistikk();
@@ -810,7 +893,7 @@ function lagForslag(medBytte) {
         .map(v => ({ nr: v["Kåringsnr"], navn: v["Vær"], fra: holder(v) }));
 
     const res = {
-        faste: [], foringsfeil: [], maaGi: [], ekstra: [],
+        faste: [], foringsfeil: [], utforte: 0, maaGi: [], ekstra: [],
         intern: { "Søndre": [], "Nordre": [] },
         bytte: { tilSor: [], tilNord: [], onsketSor: byttAntall.tilSor, onsketNord: byttAntall.tilNord },
         stjerner: null, ferdigOveralt: [], utenForslag: 0, hviler: [],
@@ -826,6 +909,7 @@ function lagForslag(medBytte) {
         const fra = medlemNavn(f.fra) || (v && v.fra);
         const til = medlemNavn(f.til);
         if (!v) { res.foringsfeil.push(`Føring ${i + 1}: Fant ikke væren ${f.nr}.`); return; }
+        if (til && v.fra.id === til.id) { res.utforte++; return; }   // står allerede der den skal (utført)
         if (brukt.has(v.nr)) { res.foringsfeil.push(`Føring ${i + 1}: ${v.navn} står i en føring fra før. Bare den første brukes.`); return; }
         if (!til || !fra) { res.foringsfeil.push(`Føring ${i + 1}: Ukjent medlem.`); return; }
         if (fra.id === til.id) { res.foringsfeil.push(`Føring ${i + 1}: ${v.navn} har samme medlem som fra og til.`); return; }
@@ -982,8 +1066,8 @@ function lagForslag(medBytte) {
     // ---------- Kontroll: ble forutsetningene oppfylt? ----------
     const K = res.kontroll;
     const fylteForinger = foringer.filter(f => f.nr && f.til).length;
-    if (fylteForinger) K.push({ ok: res.faste.length === fylteForinger,
-        tekst: `Faste føringer: ${res.faste.length} av ${fylteForinger} lagt inn.` });
+    if (fylteForinger - res.utforte > 0) K.push({ ok: res.faste.length === fylteForinger - res.utforte,
+        tekst: `Faste føringer: ${res.faste.length} av ${fylteForinger - res.utforte} tatt med.` });
 
     MEDLEMMER.forEach(m => {
         const k = medlemKrav[m.navn];
@@ -1098,29 +1182,22 @@ function tegnLaaste() {
 
 // ---------- Logistikk-siden ----------
 function forutsetningerHtml(f) {
-    const vaerValg = vaerData
-        .filter(v => imp.vaerer[v["Kåringsnr"]])
-        .slice().sort((a, b) => a["Vær"].localeCompare(b["Vær"], "no"));
-    const valg = (liste, valgt, tom) => `<option value="">${tom}</option>` + liste.map(([verdi, tekst]) =>
-        `<option value="${esc(verdi)}"${verdi === valgt ? " selected" : ""}>${esc(tekst)}</option>`).join("");
-    const medlemValg = valgt => `<option value="">Velg</option>` + AVDELINGER.map(a =>
-        `<optgroup label="${a}">${MEDLEMMER.filter(m => m.avd === a).map(m =>
-            `<option value="${esc(m.navn)}"${m.navn === valgt ? " selected" : ""}>${esc(m.navn)}</option>`).join("")}</optgroup>`).join("");
     const tallValg = (fra, til, valgt, tom) => (tom !== undefined ? `<option value="">${tom}</option>` : "") +
         Array.from({ length: til - fra + 1 }, (_, i) => fra + i).map(n =>
             `<option value="${n}"${n === valgt ? " selected" : ""}>${n}</option>`).join("");
 
-    const rader = foringer.map((fo, i) => `
-        <div class="foring">
-            <div class="foringtopp"><b>Føring ${i + 1}</b><span class="slett" onclick="fjernForing(${i})">✕ Fjern</span></div>
-            <select aria-label="Vær" onchange="endreForing(${i}, 'nr', this.value)">${
-                valg(vaerValg.map(v => [v["Kåringsnr"], (erStjerne(v["Kåringsnr"]) ? "★ " : "") + v["Vær"]]), fo.nr, "Velg vær")}</select>
-            <div class="fratil">
-                <select aria-label="Fra" onchange="endreForing(${i}, 'fra', this.value)">${medlemValg(fo.fra)}</select>
-                <span class="pil">→</span>
-                <select aria-label="Til" onchange="endreForing(${i}, 'til', this.value)">${medlemValg(fo.til)}</select>
-            </div>
-        </div>`).join("");
+    const rader = foringer.map(fo => {
+        const v = vaerData.find(x => x["Kåringsnr"] === fo.nr);
+        const utfort = v && v["Hos"] === fo.til;
+        return `
+        <div class="foring vis${utfort ? " utfort" : ""}">
+            <div class="foringtopp"><span><span class="fastmerke">Fast</span>${stjerne(fo.nr)}<b>${esc(v ? v["Vær"] : fo.nr)}</b>${obsMerke(v)}</span>
+                <span class="slett" onclick="slettForing('${esc(fo.id)}')">✕ Slett</span></div>
+            <div class="rute">${esc(fo.fra)} <span class="pil">→</span> ${esc(fo.til)}
+                ${utfort ? '<span class="ferdig">✓ Utført</span>' : ""}</div>
+            <small>Lagt inn av ${esc(fo.navn)}, ${esc(lappTid(fo.tid))}${utfort ? ". Væren står der den skal, og føringen kan slettes." : ""}</small>
+        </div>`;
+    }).join("");
 
     const kravRader = AVDELINGER.map(a => `
         <tr class="avdrad"><td colspan="5">${a}</td></tr>` + MEDLEMMER.filter(m => m.avd === a).map(m => {
@@ -1137,22 +1214,24 @@ function forutsetningerHtml(f) {
             </tr>`;
         }).join("")).join("");
 
-    const endret = foringer.length || harKrav() || byttAntall.tilSor !== ANTALL_BYTTE || byttAntall.tilNord !== ANTALL_BYTTE;
+    const endret = harKrav() || byttAntall.tilSor !== ANTALL_BYTTE || byttAntall.tilNord !== ANTALL_BYTTE;
 
     return `
     <div class="skjema">
         <b>Forutsetninger</b>
         <p class="notat">Det du setter her overstyrer beregningen, og forslagene under regnes ut på nytt med en gang.
-            Valgene huskes på denne enheten.</p>
+            <b>Faste føringer er felles og synlige for alle.</b> De andre valgene huskes bare på denne enheten.</p>
 
-        <label>Værer per medlem</label>
-        <p class="notat" style="margin-top:0">«Gi fra seg»: så mange værer skal flyttes herfra, selv om de ikke er ferdige.
-            «Ende med»: så mange værer skal medlemmet ha etterpå. «Etter» viser resultatet av forslaget.
-            Værer som hviler, telles med.</p>
-        <table class="krav">
-            <tr><th>Medlem</th><th class="midt">Har</th><th>Gi fra seg</th><th>Ende med</th><th class="midt">Etter</th></tr>
-            ${kravRader}
-        </table>
+        <details class="utvid"${visKrav || harKrav() ? " open" : ""} ontoggle="visKrav = this.open">
+            <summary>Antall værer per medlem – kun aktuelt dersom antallet ikke skal byttes «likt»${harKrav() ? ' <span class="obs">I bruk</span>' : ""}</summary>
+            <p class="notat">«Gi fra seg»: så mange værer skal flyttes herfra, selv om de ikke er ferdige.
+                «Ende med»: så mange værer skal medlemmet ha etterpå. «Etter» viser resultatet av forslaget.
+                Værer som hviler, telles med.</p>
+            <table class="krav">
+                <tr><th>Medlem</th><th class="midt">Har</th><th>Gi fra seg</th><th>Ende med</th><th class="midt">Etter</th></tr>
+                ${kravRader}
+            </table>
+        </details>
 
         <label>Antall værer i hovedbyttet</label>
         <div class="rad">
@@ -1164,10 +1243,9 @@ function forutsetningerHtml(f) {
         <p class="notat" style="margin-top:0">Alle flyttinger mellom avdelingene teller med, også faste føringer og «gi fra seg».</p>
 
         <label id="foringer">Faste føringer</label>
-        <p class="notat" style="margin-top:0">Værer som skal flyttes uansett, også værer som hviler.</p>
-        ${rader}
-        ${foringer.length < MAKS_FORINGER
-            ? `<div class="liten" onclick="leggTilForing()">+ Legg til føring (${foringer.length} / ${MAKS_FORINGER})</div>` : ""}
+        <p class="notat" style="margin-top:0">Værer som skal flyttes uansett, også værer som hviler. Alle ser dem.
+            Du trenger navnet ditt og koden for å legge inn eller slette en føring.</p>
+        ${harBeskjeder() ? `${rader}<div id="nyForing">${foringKnapp()}</div>` : '<p class="notat">Faste føringer er ikke satt opp.</p>'}
         ${endret ? `<div class="liten" onclick="nullstillForutsetninger()">Nullstill alt</div>` : ""}
     </div>`;
 }
@@ -1221,7 +1299,7 @@ function visLogistikk() {
     <h2>Logistikk</h2>
     <div class="tips">
         <b>Har du et bestemt ønske til neste flytting?</b>
-        Legg det inn som en fast føring under «Forutsetninger». Da tas det med før alt annet i beregningen.
+        Legg det inn som en fast føring under «Forutsetninger». Alle kan se den, og den tas med før alt annet i beregningen.
         <a href="#foringer" onclick="document.getElementById('foringer').scrollIntoView({behavior:'smooth'});return false">Gå til faste føringer ↓</a>
     </div>
     <p class="notat">Rekkefølge: faste føringer, medlemmer som må gi fra seg værer, flytting innad i avdelingene,
