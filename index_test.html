@@ -1246,13 +1246,23 @@ async function fjernLaast(id) {
     else alert(d.feil || "Kunne ikke fjerne.");
 }
 
+// På lappen grupperes flyttingene bare etter hva som skal kjøres: innad i hver avdeling, og mellom avdelingene.
+const LOGISTIKK_GRUPPER = ["Innad i Søndre", "Innad i Nordre", "Fraktes mellom sør og nord"];
+function logistiskeGrupper(linjer) {
+    const avd = navn => (medlemNavn(navn) || {}).avd;
+    return linjer.map(x => {
+        const fra = avd(x.fra), til = avd(x.til);
+        return { ...x, gruppe: fra && fra === til ? `Innad i ${fra}` : LOGISTIKK_GRUPPER[2] };
+    }).sort((a, b) => LOGISTIKK_GRUPPER.indexOf(a.gruppe) - LOGISTIKK_GRUPPER.indexOf(b.gruppe));
+}
+
 // En linje regnes som gjort når «Hos» i appdata.csv viser at væren er flyttet (synlig for alle),
 // eller når den er krysset av for hånd (bare på denne enheten).
 function tegnLaaste() {
     const el = document.getElementById("laaste");
     if (!el) return;
     el.innerHTML = laaste.map(lapp => {
-        const l = { ...lapp, linjer: pakkUtLaast(lapp.tekst) };
+        const l = { ...lapp, linjer: logistiskeGrupper(pakkUtLaast(lapp.tekst)) };
         const manuelt = laastGjort[l.id] || [];
         const flyttet = x => (vaerData.find(v => v["Kåringsnr"] === x.nr) || {})["Hos"] === x.til;
         const erGjort = x => flyttet(x) || manuelt.includes(x.nr);
