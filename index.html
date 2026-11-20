@@ -684,11 +684,11 @@ async function installer() {
 //
 // Forutsetninger (settes øverst på Logistikk-siden og huskes på denne enheten) overstyrer beregningen:
 //    - Prioriterte ønsker / faste føringer (inntil MAKS_FORINGER): «denne væren skal fra A til B ved neste flytting».
-//    - Per medlem: «må gi fra seg» x værer (også værer som ikke er ferdige), og/eller «skal ende med» x værer.
+//    - Per medlem: «sende fra seg» x værer (også værer som ikke er ferdige), og/eller «skal ende med» x værer.
 //    - Antall værer hver vei i hovedbyttet, valgt hver for seg (f.eks. 4 sørover og 6 nordover).
 // Rekkefølgen i beregningen:
 //    0) Faste føringer.
-//    A) Medlemmer som må gi fra seg værer (eller har flere enn de skal ende med): de værene som har minst
+//    A) Medlemmer som skal sende fra seg værer (eller har flere enn de skal ende med): de værene som har minst
 //       igjen hos medlemmet flyttes, helst innad i avdelingen.
 //    1) Innad i hver avdeling: en vær som er ferdig hos den som har den, flyttes til et medlem i samme avdeling
 //       som har mer igjen av kvoten. De som har flest søyer igjen å pare per vær de har, får flest.
@@ -714,17 +714,16 @@ function lesLager(nokkel, std) {
 }
 function skrivLager(nokkel, v) { try { localStorage.setItem(nokkel, JSON.stringify(v)); } catch (e) {} }
 
-// Antall værer i hovedbyttet: tilSor = Nordre → Søndre, tilNord = Søndre → Nordre
-const standardBytte = () => {
-    let n = ANTALL_BYTTE;
-    try { const g = parseInt(localStorage.getItem("vaerring_bytte_antall"), 10); if (g >= 2 && g <= 6) n = g; } catch (e) {}
-    return { tilSor: n, tilNord: n };
-};
+// Antall værer i hovedbyttet: tilSor = Nordre → Søndre, tilNord = Søndre → Nordre.
+// «auto» (standard) = appen regner ut antallet selv, se «Automatisk antall» i lagForslag.
+const AUTO = "auto";
+const autoBytte = () => ({ tilSor: AUTO, tilNord: AUTO });
 let byttAntall = (() => {
-    const b = lesLager("vaerring_bytte", null);
-    const ok = n => Number.isInteger(n) && n >= 0 && n <= MAKS_BYTTE;
-    return b && ok(b.tilSor) && ok(b.tilNord) ? b : standardBytte();
+    const b = lesLager("vaerring_bytte2", null);
+    const ok = n => n === AUTO || (Number.isInteger(n) && n >= 0 && n <= MAKS_BYTTE);
+    return b && ok(b.tilSor) && ok(b.tilNord) ? b : autoBytte();
 })();
+const harManueltBytte = () => byttAntall.tilSor !== AUTO || byttAntall.tilNord !== AUTO;
 
 // Faste føringer er felles for alle. De lagres som beskjeder i Google-regnearket (samme skript som de gule lappene)
 // med teksten «FØRING|kåringsnr|fra|til», og vises ikke som gule lapper.
@@ -759,8 +758,8 @@ let sisteForslag = null;
 let visKrav = false;
 
 function settBytt(retning, n) {
-    byttAntall[retning] = +n;
-    skrivLager("vaerring_bytte", byttAntall);
+    byttAntall[retning] = n === AUTO ? AUTO : +n;
+    skrivLager("vaerring_bytte2", byttAntall);
     visLogistikk();
 }
 function settByttLikevel(v) { visByttLikevel = v; visLogistikk(); }
@@ -851,9 +850,9 @@ async function slettForing(id) {
 }
 
 function nullstillForutsetninger() {
-    if (!confirm("Fjerne alle krav per medlem og sette antall i byttet tilbake til " + ANTALL_BYTTE + " hver vei? Prioriterte ønsker påvirkes ikke.")) return;
+    if (!confirm("Fjerne alle krav per medlem og sette antall i byttet tilbake til automatisk? Prioriterte ønsker påvirkes ikke.")) return;
     medlemKrav = tomtKrav(); skrivLager("vaerring_medlemskrav", medlemKrav);
-    byttAntall = { tilSor: ANTALL_BYTTE, tilNord: ANTALL_BYTTE }; skrivLager("vaerring_bytte", byttAntall);
+    byttAntall = autoBytte(); skrivLager("vaerring_bytte2", byttAntall);
     visLogistikk();
 }
 
@@ -894,7 +893,7 @@ function lagForslag(medBytte) {
     const res = {
         faste: [], foringsfeil: [], utforte: 0, maaGi: [], ekstra: [],
         intern: { "Søndre": [], "Nordre": [] },
-        bytte: { tilSor: [], tilNord: [], onsketSor: byttAntall.tilSor, onsketNord: byttAntall.tilNord },
+        bytte: { tilSor: [], tilNord: [], onsketSor: 0, onsketNord: 0, auto: null },
         stjerner: null, ferdigOveralt: [], utenForslag: 0, hviler: [],
         har: {}, etter: {}, kontroll: []
     };
@@ -948,7 +947,7 @@ function lagForslag(medBytte) {
     res.hviler = vaerer.filter(v => hviler.has(v.nr));
     const ledig = v => !flyttet.has(v.nr) && !hviler.has(v.nr);
 
-    // A) Medlemmer som må gi fra seg værer (krav «gi fra seg», eller flere enn «skal ende med»)
+    // A) Medlemmer som skal sende fra seg værer (krav «sende fra seg», eller flere enn «skal ende med»)
     const maaGiAntall = m => {
         const k = medlemKrav[m.navn];
         return Math.max(k.gi || 0, k.mal !== null ? har[m.id] - k.mal : 0);
@@ -963,7 +962,7 @@ function lagForslag(medBytte) {
             const til = mottaker(MEDLEMMER.filter(x => x.avd === m.avd), v)
                      || mottaker(MEDLEMMER.filter(x => x.avd !== m.avd), v);
             if (!til) break;
-            flytt(v, til, res.maaGi, "Må gi");
+            flytt(v, til, res.maaGi);
             trengs--;
         }
     }
@@ -991,6 +990,29 @@ function lagForslag(medBytte) {
 
     // 2) Bytte mellom Nordre og Søndre
     const b = res.bytte;
+
+    // Automatisk antall: værene fordeles mellom avdelingene i forhold til hvor mange søyer som er igjen å pare
+    // («Mangler paring»). Hvilende værer telles med. Utgangspunktet er ANTALL_BYTTE hver vei, og den avdelingen
+    // som har for få værer, får i tillegg det den mangler. Er bare én retning satt for hånd, justeres den andre
+    // så forskjellen blir riktig.
+    {
+        const sumI = (avd, fn) => MEDLEMMER.filter(m => m.avd === avd).reduce((s, m) => s + fn(m), 0);
+        // Antall i Nordre før noen flytting mellom avdelingene
+        const forN = sumI("Nordre", antallEtter) - kryss("Søndre", "Nordre") + kryss("Nordre", "Søndre");
+        const totalt = sumI("Nordre", antallEtter) + sumI("Søndre", antallEtter);
+        const bN = sumI("Nordre", behov), bS = sumI("Søndre", behov);
+        const malNord = bN + bS > 0 ? Math.round(totalt * bN / (bN + bS)) : forN;
+        const diff = malNord - forN;   // > 0: Nordre trenger flere, < 0: Søndre trenger flere
+        const s = byttAntall.tilSor, n = byttAntall.tilNord;
+        let tilSor, tilNord;
+        if (s === AUTO && n === AUTO) { tilSor = ANTALL_BYTTE + Math.max(0, -diff); tilNord = ANTALL_BYTTE + Math.max(0, diff); }
+        else if (s === AUTO) { tilNord = n; tilSor = Math.max(0, n - diff); }
+        else if (n === AUTO) { tilSor = s; tilNord = Math.max(0, s + diff); }
+        else { tilSor = s; tilNord = n; }
+        b.onsketSor = Math.min(tilSor, 10); b.onsketNord = Math.min(tilNord, 10);
+        b.auto = { malNord, malSor: totalt - malNord, forN, forS: totalt - forN, totalt, diff };
+    }
+
     if (medBytte) {
         const kandidater = avd => vaerer
             .filter(v => v.fra.avd === avd && ledig(v))
@@ -1000,6 +1022,13 @@ function lagForslag(medBytte) {
             .slice(0, 10);
 
         const nord = kandidater("Nordre"), sor = kandidater("Søndre");
+
+        // Automatisk retning: tilpass etter hvor mange som faktisk kan sendes den andre veien,
+        // så avdelingene ender med riktig fordeling selv om én retning mangler værer.
+        const muligSor = kryss("Nordre", "Søndre") + Math.min(Math.max(0, b.onsketSor - kryss("Nordre", "Søndre")), nord.length);
+        const muligNord = kryss("Søndre", "Nordre") + Math.min(Math.max(0, b.onsketNord - kryss("Søndre", "Nordre")), sor.length);
+        if (byttAntall.tilNord === AUTO) b.onsketNord = Math.min(b.onsketNord, Math.max(0, muligSor + b.auto.diff));
+        if (byttAntall.tilSor === AUTO) b.onsketSor = Math.min(b.onsketSor, Math.max(0, muligNord - b.auto.diff));
         const kSor = Math.min(Math.max(0, b.onsketSor - kryss("Nordre", "Søndre")), nord.length);    // Nordre → Søndre
         const kNord = Math.min(Math.max(0, b.onsketNord - kryss("Søndre", "Nordre")), sor.length);  // Søndre → Nordre
 
@@ -1050,7 +1079,7 @@ function lagForslag(medBytte) {
                 igjenHos(m, c.nr) - igjenHos(m, a.nr) ||                           // mest igjen hos mottakeren
                 antallEtter(c.fra) - antallEtter(a.fra))[0];                       // fra den som har flest
         if (!kilde) break;
-        flytt(kilde, m, res.ekstra, "Mål");
+        flytt(kilde, m, res.ekstra);
     }
 
     for (const v of vaerer) {
@@ -1073,7 +1102,7 @@ function lagForslag(medBytte) {
         if (k.gi !== null) {
             const ok = ut[m.id] >= k.gi;
             const hvil = vaerer.filter(v => v.fra.id === m.id && hviler.has(v.nr)).length;
-            K.push({ ok, tekst: `${m.navn} gir fra seg ${ut[m.id]} værer (krav: ${k.gi}).` +
+            K.push({ ok, tekst: `${m.navn} sender fra seg ${ut[m.id]} værer (krav: ${k.gi}).` +
                 (ok ? "" : hvil ? ` ${hvil} av værene ${m.navn} har, hviler.` : " Fant ingen som kan ta imot flere.") });
         }
         if (k.mal !== null) {
@@ -1092,7 +1121,8 @@ function lagForslag(medBytte) {
     if (medBytte) {
         const sjekk = (fraAvd, tilAvd, onsket, retning) => {
             const n = kryss(fraAvd, tilAvd);
-            let tekst = `${retning}: ${n} foreslått (ønsket: ${onsket}).`;
+            const auto = byttAntall[tilAvd === "Søndre" ? "tilSor" : "tilNord"] === AUTO;
+            let tekst = `${retning}: ${n} foreslått (ønsket: ${onsket}${auto ? ", automatisk" : ""}).`;
             if (n < onsket) {
                 const iAvd = vaerer.filter(v => v.fra.avd === fraAvd);
                 const deler = [];
@@ -1106,13 +1136,19 @@ function lagForslag(medBytte) {
                 const fulle = MEDLEMMER.filter(m => m.avd === tilAvd && !kanTa(m)).map(m => m.navn);
                 if (fulle.length) tekst += ` ${fulle.join(" og ")} har nådd «Ende med» og tar ikke imot flere.`;
             } else if (n > onsket) tekst += " Flere enn ønsket på grunn av andre forutsetninger.";
-            K.push({ ok: n >= onsket, tekst });
+            K.push({ ok: n >= onsket || auto, tekst });   // automatisk retning: kontrollen nedenfor sjekker fordelingen
         };
         // Er væren flyttet mellom avdelingene? (false = flyttet innad)
         const flyttMap = new Map(alleFlytt().map(x => [x.nr, x]));
         const kryssEn = v => { const x = flyttMap.get(v.nr); return x ? x.fra.avd !== x.til.avd : null; };
         sjekk("Nordre", "Søndre", b.onsketSor, "Nordre → Søndre");
         sjekk("Søndre", "Nordre", b.onsketNord, "Søndre → Nordre");
+        if (byttAntall.tilSor === AUTO || byttAntall.tilNord === AUTO) {
+            const iNord = MEDLEMMER.filter(m => m.avd === "Nordre").reduce((s, m) => s + antallEtter(m), 0);
+            K.push({ ok: iNord === b.auto.malNord,
+                tekst: `Fordeling etter flyttingene, Nordre / Søndre: ${iNord} / ${b.auto.totalt - iNord} værer ` +
+                       `(automatisk mål: ${b.auto.malNord} / ${b.auto.malSor}).` });
+        }
     }
     return res;
 }
@@ -1126,7 +1162,7 @@ const LAAST_PREFIKS = "LÅST|";
 const MAKS_TEGN = 200;   // samme grense som for beskjeder
 const LAAST_GRUPPER = [
     ["F", "Prioriterte ønsker", f => f.faste],
-    ["G", "Må gi fra seg", f => f.maaGi],
+    ["G", "Sende fra seg", f => f.maaGi],
     ["S", "Innad i Søndre", f => f.intern["Søndre"]],
     ["N", "Innad i Nordre", f => f.intern["Nordre"]],
     ["s", "Nordre → Søndre", f => f.bytte.tilSor],
@@ -1246,13 +1282,23 @@ async function fjernLaast(id) {
     else alert(d.feil || "Kunne ikke fjerne.");
 }
 
+// På lappen grupperes flyttingene bare etter hva som skal kjøres: innad i hver avdeling, og mellom avdelingene.
+const LOGISTIKK_GRUPPER = ["Innad i Søndre", "Innad i Nordre", "Fraktes mellom sør og nord"];
+function logistiskeGrupper(linjer) {
+    const avd = navn => (medlemNavn(navn) || {}).avd;
+    return linjer.map(x => {
+        const fra = avd(x.fra), til = avd(x.til);
+        return { ...x, gruppe: fra && fra === til ? `Innad i ${fra}` : LOGISTIKK_GRUPPER[2] };
+    }).sort((a, b) => LOGISTIKK_GRUPPER.indexOf(a.gruppe) - LOGISTIKK_GRUPPER.indexOf(b.gruppe));
+}
+
 // En linje regnes som gjort når «Hos» i appdata.csv viser at væren er flyttet (synlig for alle),
 // eller når den er krysset av for hånd (bare på denne enheten).
 function tegnLaaste() {
     const el = document.getElementById("laaste");
     if (!el) return;
     el.innerHTML = laaste.map(lapp => {
-        const l = { ...lapp, linjer: pakkUtLaast(lapp.tekst) };
+        const l = { ...lapp, linjer: logistiskeGrupper(pakkUtLaast(lapp.tekst)) };
         const manuelt = laastGjort[l.id] || [];
         const flyttet = x => (vaerData.find(v => v["Kåringsnr"] === x.nr) || {})["Hos"] === x.til;
         const erGjort = x => flyttet(x) || manuelt.includes(x.nr);
@@ -1301,7 +1347,7 @@ function forutsetningerHtml(f) {
             return `<tr>
                 <td>${esc(m.navn)}</td>
                 <td class="midt">${har}</td>
-                <td><select aria-label="${esc(m.navn)} gir fra seg" onchange="settKrav('${esc(m.navn)}', 'gi', this.value)">${
+                <td><select aria-label="${esc(m.navn)} sender fra seg" onchange="settKrav('${esc(m.navn)}', 'gi', this.value)">${
                     tallValg(1, Math.max(1, har), k.gi, "–")}</select></td>
                 <td><select aria-label="${esc(m.navn)} skal ende med" onchange="settKrav('${esc(m.navn)}', 'mal', this.value)">${
                     tallValg(0, MAKS_MAL, k.mal, "–")}</select></td>
@@ -1309,7 +1355,15 @@ function forutsetningerHtml(f) {
             </tr>`;
         }).join("")).join("");
 
-    const endret = harKrav() || byttAntall.tilSor !== ANTALL_BYTTE || byttAntall.tilNord !== ANTALL_BYTTE;
+    const endret = harKrav() || harManueltBytte();
+    const byttValg = retning => `<option value="${AUTO}"${byttAntall[retning] === AUTO ? " selected" : ""}>Automatisk</option>` +
+        tallValg(0, MAKS_BYTTE, byttAntall[retning]);
+    const a = f.bytte.auto, bb = f.bytte;
+    const autoTekst = a && (byttAntall.tilSor === AUTO || byttAntall.tilNord === AUTO) ? `
+        <p class="notat" style="margin-top:0"><b>Automatisk:</b> Ut fra hvor mange søyer som er igjen å pare, bør Nordre ha
+            ca. ${a.malNord} og Søndre ca. ${a.malSor} av ${a.totalt} værer (nå ${a.forN} / ${a.forS}, hvilende værer telles med).
+            Det gir ${bb.onsketSor} sørover og ${bb.onsketNord} nordover.
+            ${byttAntall.tilSor === AUTO && byttAntall.tilNord === AUTO ? `Utgangspunktet er ${ANTALL_BYTTE} hver vei, og den avdelingen som har for få, får i tillegg det som mangler.` : ""}</p>` : "";
 
     return `
     <div class="skjema">
@@ -1320,11 +1374,11 @@ function forutsetningerHtml(f) {
 
         <details class="utvid"${visKrav || harKrav() ? " open" : ""} ontoggle="visKrav = this.open">
             <summary>Antall værer per medlem – kun aktuelt dersom antallet ikke skal byttes «likt»${harKrav() ? ' <span class="obs">I bruk</span>' : ""}</summary>
-            <p class="notat">«Gi fra seg»: så mange værer skal flyttes herfra, selv om de ikke er ferdige.
+            <p class="notat">«Sende fra seg»: så mange værer skal sendes herfra, selv om de ikke er ferdige.
                 «Ende med»: så mange værer skal medlemmet ha etterpå. «Etter» viser resultatet av forslaget.
                 Værer som hviler, telles med.</p>
             <table class="krav">
-                <tr><th>Medlem</th><th class="midt">Har</th><th>Gi fra seg</th><th>Ende med</th><th class="midt">Etter</th></tr>
+                <tr><th>Medlem</th><th class="midt">Har</th><th>Sende fra seg</th><th>Ende med</th><th class="midt">Etter</th></tr>
                 ${kravRader}
             </table>
         </details>
@@ -1332,11 +1386,12 @@ function forutsetningerHtml(f) {
         <label>Antall værer i hovedbyttet</label>
         <div class="rad">
             <div style="flex:1"><small>Nordre → Søndre</small>
-                <select onchange="settBytt('tilSor', this.value)">${tallValg(0, MAKS_BYTTE, byttAntall.tilSor)}</select></div>
+                <select onchange="settBytt('tilSor', this.value)">${byttValg("tilSor")}</select></div>
             <div style="flex:1"><small>Søndre → Nordre</small>
-                <select onchange="settBytt('tilNord', this.value)">${tallValg(0, MAKS_BYTTE, byttAntall.tilNord)}</select></div>
+                <select onchange="settBytt('tilNord', this.value)">${byttValg("tilNord")}</select></div>
         </div>
-        <p class="notat" style="margin-top:0">Alle flyttinger mellom avdelingene teller med, også prioriterte ønsker og «gi fra seg».</p>
+        ${autoTekst}
+        <p class="notat" style="margin-top:0">Alle flyttinger mellom avdelingene teller med, også prioriterte ønsker og «sende fra seg».</p>
 
         <label id="foringer">Prioriterte ønsker for neste flytting (faste føringer)</label>
         <p class="notat" style="margin-top:0">Her legger hvert medlem inn værer de ønsker flyttet ved neste flytting.
@@ -1378,17 +1433,24 @@ function visLogistikk() {
         <h3 class="avsnitt">${tittel}</h3>
         ${fs.length ? kort(fs) : '<p class="notat">Ingen forslag akkurat nå.</p>'}`;
 
-    const b = f.bytte, st = f.stjerner;
-    const harBytte = b.tilSor.length + b.tilNord.length > 0;
+    const st = f.stjerner;
+    // Alle flyttinger samles etter hva som skal kjøres, uansett hvorfor de foreslås
+    // (prioritert ønske, «sende fra seg», ferdig vær, bytte eller ønsket antall).
+    const alle = [...f.faste, ...f.maaGi, ...f.intern["Søndre"], ...f.intern["Nordre"],
+                  ...f.bytte.tilSor, ...f.bytte.tilNord, ...f.ekstra];
+    const innad = avd => alle.filter(x => x.fra.avd === avd && x.til.avd === avd);
+    const mellom = (fra, til) => alle.filter(x => x.fra.avd === fra && x.til.avd === til);
+    const tilSor = mellom("Nordre", "Søndre"), tilNord = mellom("Søndre", "Nordre");
+    const harMellom = tilSor.length + tilNord.length > 0;
 
-    const byttedel = visBytte ? `
-        ${harBytte ? `
-        ${b.tilSor.length ? `<h4>Fra Nordre til Søndre</h4>${kort(b.tilSor)}` : ""}
-        ${b.tilNord.length ? `<h4>Fra Søndre til Nordre</h4>${kort(b.tilNord)}` : ""}`
-        : '<p class="notat">Ingen flere værer skal byttes med disse forutsetningene.</p>'}
-        ${status.trengs ? "" : '<div class="liten" onclick="settByttLikevel(false)">Skjul forslag</div>'}`
-        : `<p class="notat">Ikke nødvendig ennå.</p>
-        <div class="liten" onclick="settByttLikevel(true)">Vis forslag likevel</div>`;
+    const byttedel = `
+        ${harMellom ? `
+        ${tilSor.length ? `<h4>Fra Nordre til Søndre</h4>${kort(tilSor)}` : ""}
+        ${tilNord.length ? `<h4>Fra Søndre til Nordre</h4>${kort(tilNord)}` : ""}`
+        : `<p class="notat">${visBytte ? "Ingen værer skal fraktes mellom avdelingene med disse forutsetningene." : "Ikke nødvendig ennå."}</p>`}
+        ${visBytte
+            ? (status.trengs ? "" : '<div class="liten" onclick="settByttLikevel(false)">Skjul forslag til bytte</div>')
+            : '<div class="liten" onclick="settByttLikevel(true)">Vis forslag til bytte likevel</div>'}`;
 
     document.getElementById("app").innerHTML = `
     <div class="tilbake" onclick="visForside()">← Tilbake</div>
@@ -1408,18 +1470,15 @@ function visLogistikk() {
     ${forutsetningerHtml(f)}
     ${f.foringsfeil.map(a => `<div class="feil">${esc(a)}</div>`).join("")}
     ${kontrollHtml(f)}
-    ${f.faste.length ? seksjon("Prioriterte ønsker", f.faste) : ""}
-    ${f.maaGi.length ? seksjon("Må gi fra seg", f.maaGi) : ""}
-    ${seksjon("Innad i Søndre", f.intern["Søndre"])}
-    ${seksjon("Innad i Nordre", f.intern["Nordre"])}
+    ${seksjon("Innad i Søndre", innad("Søndre"))}
+    ${seksjon("Innad i Nordre", innad("Nordre"))}
 
-    <h3 class="avsnitt">Bytte mellom Nordre og Søndre${visBytte && harBytte ? ` (${b.tilSor.length} sørover, ${b.tilNord.length} nordover)` : ""}</h3>
+    <h3 class="avsnitt">Fraktes mellom sør og nord${harMellom ? ` (${tilSor.length} sørover, ${tilNord.length} nordover)` : ""}</h3>
     <p class="notat">Bytte trengs når minst ${BYTTE_VAERER} værer er ferdige hos minst ${BYTTE_MEDLEMMER} av ${MEDLEMMER.length} medlemmer.
         Nå: ${status.ferdige} av ${status.totalt} værer.
         <span class="stjerne">★</span> Stjerneværer, Nordre / Søndre: nå ${st.foer[0]} / ${st.foer[1]},
         etter flyttingene ${st.etter[0]} / ${st.etter[1]}.</p>
     ${byttedel}
-    ${f.ekstra.length ? seksjon("For å nå ønsket antall", f.ekstra) : ""}
 
     <p class="notat" style="margin-top:20px">
         ${f.utenForslag} værer blir stående der de er.
