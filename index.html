@@ -128,6 +128,7 @@ td:last-child{text-align:right;font-weight:bold}
 body:not(.forklaringer) .forklaring{display:none}
 .tittelrad{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .forklaringknapp{cursor:pointer;color:#555;font-size:14px;border:1px solid #ccc;border-radius:14px;padding:4px 10px;background:white;white-space:nowrap}
+.kaarnr{color:#666;font-size:13px;white-space:nowrap}
 .huske li.gruppe{cursor:default;font-size:12px;font-weight:bold;color:#6b5f00;text-transform:uppercase;padding-top:8px}
 </style>
 </head>
@@ -152,7 +153,7 @@ body:not(.forklaringer) .forklaring{display:none}
 
 <script>
 // Versjon av appen. Endres hver gang index.html endres, så det er lett å se om telefonen viser siste utgave.
-const APP_VERSJON = "20.11.2026 kl. 20.05";
+const APP_VERSJON = "20.11.2026 kl. 20.25";
 document.getElementById("versjon").textContent = "Versjon " + APP_VERSJON;
 
 // Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
@@ -1029,8 +1030,9 @@ function lagForslag(medBytte) {
     const ledig = v => !flyttet.has(v.nr) && !hviler.has(v.nr);
 
     // Værer med FAA_PARRINGER eller færre parringer der de står, foreslås ikke flyttet bare fordi de er ferdige.
-    // De kan likevel flyttes når det trengs: prioriterte ønsker, «sende fra seg», «ende med» og bytte med
-    // antall satt for hånd (der velges de sist). Automatisk bytte tar dem ikke med.
+    // De kan likevel flyttes når det trengs: prioriterte ønsker, «sende fra seg», bytte med antall satt for hånd
+    // (der velges de sist), og «ende med» innad i avdelingen. Mellom nord og sør flyttes de ikke for å nå
+    // «ende med», og automatisk bytte tar dem ikke med.
     const faa = v => utfort(v.fra, v.nr) <= FAA_PARRINGER;
 
     // Flytting mellom nord og sør: helst værer som har «gått sin runde» i avdelingen de står i, dvs. har
@@ -1050,11 +1052,14 @@ function lagForslag(medBytte) {
     // Sender «trengs» værer fra medlemmet m. Rekkefølge: værer som kan bli i avdelingen, så værer som kan gå
     // til den andre avdelingen uten å være en returreise (helst ikke værer med få parringer), og til slutt
     // returreiser. Innenfor hver gruppe: de som har minst igjen hos m først.
-    const sendUt = (m, trengs) => {
+    // Med kunGode = true (for «Ende med») sendes ikke værer med få parringer eller returreiser over til den
+    // andre avdelingen. «Sende fra seg» er et uttrykkelig krav og kan bruke alle.
+    const sendUt = (m, trengs, kunGode = false) => {
         while (trengs > 0) {
             const valg = vaerer.filter(v => v.fra.id === m.id && ledig(v)).map(v => {
                 const samme = mottaker(MEDLEMMER.filter(x => x.avd === m.avd), v);
-                const til = samme || mottaker(MEDLEMMER.filter(x => x.avd !== m.avd), v);
+                const andre = samme || (kunGode && unngaa(v)) ? null : mottaker(MEDLEMMER.filter(x => x.avd !== m.avd), v);
+                const til = samme || andre;
                 const rang = samme ? 0 : 1 + krysRang(v);
                 return { v, til, rang };
             }).filter(x => x.til)
@@ -1098,7 +1103,7 @@ function lagForslag(medBytte) {
         const sum = fn => ms.reduce((s, m) => s + fn(m), 0);
         let eksport = sum(over) - sum(underMal);
         while (eksport > 0) {
-            const valg = vaerer.filter(v => v.fra.avd === avd && ledig(v) && (mal(v.fra) !== null || antallEtter(v.fra) > 1))
+            const valg = vaerer.filter(v => v.fra.avd === avd && ledig(v) && !unngaa(v) && (mal(v.fra) !== null || antallEtter(v.fra) > 1))
                 .map(v => ({ v, til: mottaker(MEDLEMMER.filter(x => x.avd !== avd), v) }))
                 .filter(x => x.til)
                 .sort((a, b) => krysRang(a.v) - krysRang(b.v) ||                       // helst gått sin runde
@@ -1113,7 +1118,7 @@ function lagForslag(medBytte) {
             const giver = ms.filter(m => over(m) > 0).sort((a, b) => over(b) - over(a))[0];
             if (!giver) break;
             const mottakere = ms.filter(m => underMal(m) > 0);
-            if (!mottakere.length) { sendUt(giver, over(giver)); break; }   // ingen i avdelingen har plass
+            if (!mottakere.length) { sendUt(giver, over(giver), true); break; }   // ingen i avdelingen har plass
             const valg = vaerer.filter(v => v.fra.id === giver.id && ledig(v)).flatMap(v => mottakere.map(m => ({ v, m })))
                 .sort((a, b) => Number(igjenHos(b.m, b.v.nr) > 0) - Number(igjenHos(a.m, a.v.nr) > 0) ||   // mottakeren har noe igjen
                     igjenHos(giver, a.v.nr) - igjenHos(giver, b.v.nr) ||                                      // minst igjen hos giveren
@@ -1233,7 +1238,7 @@ function lagForslag(medBytte) {
             return Math.abs(n - s) > 1 ? 1 : 0;
         };
         const kilde = vaerer
-            .filter(v => ledig(v) && v.fra.id !== m.id && kanAvgi(v.fra))
+            .filter(v => ledig(v) && v.fra.id !== m.id && kanAvgi(v.fra) && (v.fra.avd === m.avd || !unngaa(v)))
             .sort((a, c) =>
                 (a.fra.avd === m.avd ? 0 : 1) - (c.fra.avd === m.avd ? 0 : 1) ||   // helst samme avdeling
                 stjerneStraff(a) - stjerneStraff(c) ||                             // hold stjernene jevnt fordelt
@@ -1273,7 +1278,7 @@ function lagForslag(medBytte) {
             const n = antallEtter(m), ok = n === k.mal;
             K.push({ ok, tekst: `${m.navn} ender med ${n} værer (ønsket: ${k.mal}).` +
                 (ok ? "" : n < k.mal ? " Fant ikke flere værer som kan flyttes hit uten å tømme andre."
-                                     : " Noen av værene kan ikke flyttes (hviler eller har et prioritert ønske).") });
+                                     : " De andre værene kan ikke flyttes: de hviler, har et prioritert ønske, har få parringer der de står eller kom nylig fra den andre avdelingen.") });
         }
     });
 
@@ -1632,7 +1637,7 @@ function minOversiktHtml(f) {
     const sende = linjer.filter(x => x.fra === m.navn), faa = linjer.filter(x => x.til === m.navn);
     const har = vaerData.filter(v => imp.vaerer[v["Kåringsnr"]] && v["Hos"] === m.navn).length;
     const etter = har - sende.filter(x => !gjort(x)).length + faa.filter(x => !gjort(x)).length;
-    const rad = (x, tekst) => `<li class="${gjort(x) ? "gjort" : ""}">${gjort(x) ? "✓ " : ""}${stjerne(x.nr)}<b>${esc(x.navn)}</b> ${tekst}</li>`;
+    const rad = (x, tekst) => `<li class="${gjort(x) ? "gjort" : ""}">${gjort(x) ? "✓ " : ""}${stjerne(x.nr)}<b>${esc(x.navn)}</b> <span class="kaarnr">${esc(x.nr)}</span> ${tekst}</li>`;
 
     return `
     <div class="meg">
