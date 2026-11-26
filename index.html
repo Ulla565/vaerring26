@@ -157,7 +157,7 @@ body:not(.forklaringer) .forklaring{display:none}
 
 <script>
 // Versjon av appen. Endres hver gang index.html endres, så det er lett å se om telefonen viser siste utgave.
-const APP_VERSJON = "23.11.2026 kl. 14.00";
+const APP_VERSJON = "26.11.2026 kl. 12.45";
 document.getElementById("versjon").textContent = "Versjon " + APP_VERSJON;
 
 // Medlemmene er hardkodet. id = produsentens kåringsnummer i Sauekontrollen.
@@ -762,6 +762,7 @@ const MAKS_MAL = 12;           // høyeste «skal ende med» som kan velges
 const BYTTE_MEDLEMMER = 4;     // «ferdig hos de fleste medlemmene»: minst 4 av 6
 const BYTTE_VAERER = 4;        // «flere av værene»: minst 4 værer
 const FAA_PARRINGER = 3;       // en vær med så mange eller færre parringer der den står, flyttes bare når det trengs
+const MIN_VAERER = 2;          // hvert medlem skal i utgangspunktet ha minst så mange værer med noe igjen å pare
 
 function lesLager(nokkel, std) {
     try { const v = localStorage.getItem(nokkel); return v === null ? std : JSON.parse(v); } catch (e) { return std; }
@@ -1051,9 +1052,12 @@ function lagForslag(medBytte) {
     const underMal = m => mal(m) === null ? 0 : Math.max(0, mal(m) - antallEtter(m));
     const kanTa = m => mal(m) === null || antallEtter(m) < mal(m);
     const poeng = m => behov(m) / (aktive[m.id] + inn[m.id] + 1);
+    // Nye værer først: 0 = ikke brukt hos medlemmet, 1 = brukt under halve kvoten, 2 = brukt mer
+    const bruktGrad = (m, nr) => { const u = utfort(m, nr); return u === 0 ? 0 : u < kvote(m) / 2 ? 1 : 2; };
     const mottaker = (liste, v) => {
         const mulige = liste.filter(m => m.id !== v.fra.id && kanTa(m));
-        const sorter = (a, b) => underMal(b) - underMal(a) || poeng(b) - poeng(a) || igjenHos(b, v.nr) - igjenHos(a, v.nr);
+        const sorter = (a, b) => underMal(b) - underMal(a) || bruktGrad(a, v.nr) - bruktGrad(b, v.nr) ||
+            poeng(b) - poeng(a) || igjenHos(b, v.nr) - igjenHos(a, v.nr);
         // Helst en som har noe igjen å pare med væren; ellers den som trenger flest værer
         return mulige.filter(m => igjenHos(m, v.nr) > 0).sort(sorter)[0] || mulige.sort(sorter)[0];
     };
@@ -1075,7 +1079,7 @@ function lagForslag(medBytte) {
     // De kan likevel flyttes når det trengs: prioriterte ønsker, «sende fra seg», bytte med antall satt for hånd
     // (der velges de sist), og «ende med» innad i avdelingen. Mellom nord og sør flyttes de ikke for å nå
     // «ende med», og automatisk bytte tar dem ikke med.
-    const faa = v => utfort(v.fra, v.nr) <= FAA_PARRINGER;
+    const faa = v => utfort(v.fra, v.nr) <= FAA_PARRINGER && !erFerdig(v.fra, v.nr);   // nådd kvoten = ferdig, uansett antall
 
     // Flytting mellom nord og sør: helst værer som har «gått sin runde» i avdelingen de står i, dvs. har
     // parringer hos flere (aller helst alle) medlemmene der, eller er ferdige hos alle der.
@@ -1123,7 +1127,8 @@ function lagForslag(medBytte) {
     // 1) Innad i avdelingene. Mottakeren må ha noe igjen å pare med væren. Helst en som er under «Ende med».
     //    Er alle på eller over målet sitt, kan væren likevel byttes: mottakeren tar imot denne og sender fra seg
     //    en annen i trinn A2, så antallet blir riktig og værene roterer.
-    const sorterMottaker = v => (a, b) => underMal(b) - underMal(a) || poeng(b) - poeng(a) || igjenHos(b, v.nr) - igjenHos(a, v.nr);
+    const sorterMottaker = v => (a, b) => underMal(b) - underMal(a) || bruktGrad(a, v.nr) - bruktGrad(b, v.nr) ||
+        poeng(b) - poeng(a) || igjenHos(b, v.nr) - igjenHos(a, v.nr);
     const overMal = m => mal(m) === null ? 0 : Math.max(0, antallEtter(m) + 1 - mal(m));
     for (const v of vaerer) {
         if (!ledig(v) || !erFerdig(v.fra, v.nr) || faa(v)) continue;
@@ -1293,6 +1298,41 @@ function lagForslag(medBytte) {
         flytt(kilde, m, res.ekstra);
     }
 
+    // C) Ingen skal i utgangspunktet ha færre enn MIN_VAERER værer med noe igjen å pare. Mangler noen, hentes
+    //    værer som er nye eller lite brukt hos mottakeren, helst fra samme avdeling, helst værer som er ferdige
+    //    eller har minst igjen der de står. Den som gir, beholder selv minst MIN_VAERER.
+    const sluttHos = () => {
+        const s = new Map(vaerer.map(v => [v.nr, v.fra]));
+        alleFlytt().forEach(x => s.set(x.nr, x.til));
+        return s;
+    };
+    const brukbareHos = (m, s) => vaerer.filter(v => s.get(v.nr).id === m.id && igjenHos(m, v.nr) > 0).length;
+    for (let runde = 0; runde < 20; runde++) {
+        const s = sluttHos();
+        const m = MEDLEMMER.filter(x => brukbareHos(x, s) < MIN_VAERER)
+            .sort((a, c) => brukbareHos(a, s) - brukbareHos(c, s) || behov(c) - behov(a))[0];
+        if (!m) break;
+        const [sN, sS] = flyttStjerner(foer, alleFlytt());
+        const stjerneStraff = v => {
+            if (!erStjerne(v.nr) || v.fra.avd === m.avd) return 0;
+            const n = m.avd === "Nordre" ? sN + 1 : sN - 1, so = m.avd === "Nordre" ? sS - 1 : sS + 1;
+            return Math.abs(n - so) > 1 ? 1 : 0;
+        };
+        const kilde = vaerer
+            .filter(v => ledig(v) && v.fra.id !== m.id && igjenHos(m, v.nr) > 0 && kanAvgi(v.fra) &&
+                brukbareHos(v.fra, s) - (igjenHos(v.fra, v.nr) > 0 ? 1 : 0) >= MIN_VAERER &&
+                (v.fra.avd === m.avd || !unngaa(v)))
+            .sort((a, c) =>
+                (a.fra.avd === m.avd ? 0 : 1) - (c.fra.avd === m.avd ? 0 : 1) ||   // helst samme avdeling
+                stjerneStraff(a) - stjerneStraff(c) ||                             // hold stjernene jevnt fordelt
+                bruktGrad(m, a.nr) - bruktGrad(m, c.nr) ||                         // nye eller lite brukt hos mottakeren
+                Number(erFerdig(c.fra, c.nr)) - Number(erFerdig(a.fra, a.nr)) ||   // helst ferdig der den står
+                igjenHos(a.fra, a.nr) - igjenHos(c.fra, c.nr) ||                   // minst igjen der den står
+                igjenHos(m, c.nr) - igjenHos(m, a.nr))[0];                         // mest igjen hos mottakeren
+        if (!kilde) break;
+        flytt(kilde, m, res.ekstra);
+    }
+
     for (const v of vaerer) {
         if (!ledig(v)) continue;
         if (erFerdig(v.fra, v.nr) && restI("Nordre", v.nr) + restI("Søndre", v.nr) === 0) res.ferdigOveralt.push(v);
@@ -1303,6 +1343,7 @@ function lagForslag(medBytte) {
     MEDLEMMER.forEach(m => { res.har[m.navn] = har[m.id]; res.etter[m.navn] = antallEtter(m); });
 
     // ---------- Kontroll: ble forutsetningene oppfylt? ----------
+    const minKryss = res.ekstra.filter(x => x.fra.avd !== x.til.avd);
     const K = res.kontroll;
     const fylteForinger = foringer.filter(f => f.nr && f.til && !erDodNr(f.nr)).length;
     if (fylteForinger - res.utforte > 0) K.push({ ok: res.faste.length === fylteForinger - res.utforte,
@@ -1323,6 +1364,16 @@ function lagForslag(medBytte) {
                                      : " De andre værene kan ikke flyttes: de hviler, har et prioritert ønske, har få parringer der de står eller kom nylig fra den andre avdelingen.") });
         }
     });
+
+    {
+        const s = sluttHos();
+        MEDLEMMER.forEach(m => {
+            const n = brukbareHos(m, s);
+            if (n < MIN_VAERER) K.push({ ok: false,
+                tekst: `${m.navn} har bare ${n} ${n === 1 ? "vær" : "værer"} med noe igjen å pare etter flyttingene (minst ${MIN_VAERER}). ` +
+                       "Fant ingen flere som kan flyttes hit uten at andre får for få. Legg inn et prioritert ønske om nødvendig." });
+        });
+    }
 
     const [stN, stS] = res.stjerner.etter;
     if ((stN === 0 || stS === 0) && STJERNER.filter(nr => !erDodNr(nr)).length >= 2) K.push({ ok: false,
@@ -1362,7 +1413,10 @@ function lagForslag(medBytte) {
             const iNord = MEDLEMMER.filter(m => m.avd === "Nordre").reduce((s, m) => s + antallEtter(m), 0);
             K.push({ ok: iNord === b.auto.malNord,
                 tekst: `Fordeling etter flyttingene, Nordre / Søndre: ${iNord} / ${b.auto.totalt - iNord} værer ` +
-                       `(automatisk mål: ${b.auto.malNord} / ${b.auto.malSor}).` });
+                       `(automatisk mål: ${b.auto.malNord} / ${b.auto.malSor}).` +
+                       (iNord !== b.auto.malNord && minKryss.length
+                           ? ` ${minKryss.map(x => x.navn).join(" og ")} går over for at ${[...new Set(minKryss.map(x => x.til.navn))].join(" og ")} skal ha minst ${MIN_VAERER} værer med noe igjen å pare.`
+                           : "") });
         }
     }
     return res;
@@ -1762,7 +1816,8 @@ function visLogistikk() {
     </div>
     <p class="notat forklaring">Rekkefølge for automatisk beregning: 1. evt. prioriterte ønsker (faste føringer), 2. evt. endringer i antall per medlem,
         3. flytting innad i avdelingene, 4. bytte mellom avdelingene, og til slutt 5. flytting så alle ender med ønsket antall.
-        De som har flest søyer igjen å pare får flest værer. Værer med ${FAA_PARRINGER} eller færre parringer der de står,
+        De som har flest søyer igjen å pare får flest værer, og helst værer de ikke har brukt før.
+        Alle skal ha minst ${MIN_VAERER} værer med noe igjen å pare. Værer med ${FAA_PARRINGER} eller færre parringer der de står,
         foreslås bare flyttet når det trengs av andre grunner. En vær som nylig kom fra den andre avdelingen,
         sendes ikke tilbake før den har gått sin runde der den står. Mellom nord og sør flyttes helst værer som
         har parringer hos flere i avdelingen de står i, aller helst hos alle. Stjerneværene (<span class="stjerne">★</span>) fordeles
